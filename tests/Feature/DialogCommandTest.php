@@ -1,0 +1,58 @@
+<?php
+
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
+
+test('it keeps conversation history across turns', function () {
+    Http::fakeSequence()
+        ->push([
+            'content' => [
+                ['text' => 'Nice to meet you, Sam.'],
+            ],
+        ])
+        ->push([
+            'content' => [
+                ['text' => 'Your name is Sam.'],
+            ],
+        ]);
+
+    $this->artisan('dialog')
+        ->expectsQuestion('What is on your mind?', 'My name is Sam.')
+        ->expectsOutput('Nice to meet you, Sam.')
+        ->expectsQuestion('What is on your mind?', 'What is my name?')
+        ->expectsOutput('Your name is Sam.')
+        ->expectsQuestion('What is on your mind?', 'exit')
+        ->expectsOutput('Goodbye!')
+        ->assertSuccessful();
+
+    Http::assertSentCount(2);
+
+    $requests = Http::recorded();
+
+    /** @var Request $firstRequest */
+    $firstRequest = $requests[0][0];
+
+    expect($firstRequest['messages'])->toBe([
+        ['role' => 'user', 'content' => 'My name is Sam.'],
+    ]);
+
+    /** @var Request $secondRequest */
+    $secondRequest = $requests[1][0];
+
+    expect($secondRequest['messages'])->toBe([
+        ['role' => 'user', 'content' => 'My name is Sam.'],
+        ['role' => 'assistant', 'content' => 'Nice to meet you, Sam.'],
+        ['role' => 'user', 'content' => 'What is my name?'],
+    ]);
+});
+
+test('it exits without calling anthropic when user types exit immediately', function () {
+    Http::fake();
+
+    $this->artisan('dialog')
+        ->expectsQuestion('What is on your mind?', 'exit')
+        ->expectsOutput('Goodbye!')
+        ->assertSuccessful();
+
+    Http::assertNothingSent();
+});

@@ -171,9 +171,106 @@ This course teaches you how to build AI agents step-by-step, starting with the f
 
 ---
 
+## Episode 02: Have A Dialog
+
+### Key Lessons & Practical Examples
+
+- **Rename the command from `chat` to `dialogue` to reflect ongoing conversation**
+  ```php
+  // Before
+  protected $signature = 'chat';
+  protected $description = 'Chat with an AI model';
+
+  // After
+  protected $signature = 'dialogue';
+  protected $description = 'Converse with OpenAI';
+  ```
+
+- **Track conversation history as the source of truth**
+  ```php
+  /** @var array<int, array{role: string, content: string}> $history */
+  $history = [];
+  ```
+
+- **Append each user prompt to history before calling the model**
+  ```php
+  $prompt = text(label: 'What is on your mind?', required: true);
+
+  $history[] = [
+      'role' => 'user',
+      'content' => $prompt,
+  ];
+  ```
+
+- **Send full history as input so the model keeps context**
+  ```php
+  $response = $this->runModel($history);
+  ```
+  ```php
+  private function runModel(array $input): array
+  {
+      return Http::withToken(config('services.openai.key'))
+          ->post('https://api.openai.com/v1/responses', [
+              'model' => 'gpt-5.4-nano',
+              'input' => $input,
+          ])
+          ->throw()
+          ->json();
+  }
+  ```
+
+- **Append AI output back into history to continue the dialog**
+  ```php
+  $history = [
+      ...$history,
+      ...$response['output'],
+  ];
+  ```
+
+- **Use a `while (true)` loop for continuous back-and-forth**
+  ```php
+  while (true) {
+      $prompt = text(label: 'What is on your mind?', required: true);
+
+      $history[] = [
+          'role' => 'user',
+          'content' => $prompt,
+      ];
+
+      $response = spin(
+          callback: fn() => $this->runModel($history),
+          message: 'Thinking about that...'
+      );
+
+      $history = [
+          ...$history,
+          ...$response['output'],
+      ];
+
+      $this->info($response['output'][0]['content'][0]['text'] ?? 'No text response returned.');
+  }
+  ```
+
+- **Without history, every prompt is a clean slate; with history, memory works**
+  ```text
+  User: Hi there
+  AI: Hi! How can I help you today?
+  User: Call me Jeffrey
+  AI: Sure thing, Jeffrey.
+  User: What is my name?
+  AI: Your name is Jeffrey.
+  ```
+
+- **The loop is necessary, but tools are what make it a true agent**
+  ```text
+  Episode 01: Single prompt -> single response
+  Episode 02: Loop + history -> ongoing dialog
+  Episode 03+: Add tool execution -> agent behavior
+  ```
+
 ## Next Episodes
-- Episode 02: [To be added]
 - Episode 03: [To be added]
+- Episode 04: [To be added]
 - And more...
 
 ---
