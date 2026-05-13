@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\AI\Tools\CurrentTime;
+use App\AI\Tools\ReadFile;
+use App\AI\Tools\Tool;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -101,36 +104,20 @@ class AgentCommand extends Command
      */
     private function toolDefinitions(): array
     {
+        return collect($this->tools())
+            ->map(fn (Tool $tool): array => $tool->definition())
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<Tool>
+     */
+    private function tools(): array
+    {
         return [
-            [
-                'type' => 'function',
-                'name' => 'get_current_time',
-                'description' => 'Get the current server time as an ISO string.',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [],
-                    'required' => [],
-                    'additionalProperties' => false,
-                ],
-                'strict' => true,
-            ],
-            [
-                'type' => 'function',
-                'name' => 'read_file',
-                'description' => 'Read a file from the project root.',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'path' => [
-                            'type' => 'string',
-                            'description' => 'The relative file path to read.',
-                        ],
-                    ],
-                    'required' => ['path'],
-                    'additionalProperties' => false,
-                ],
-                'strict' => true,
-            ],
+            new CurrentTime,
+            new ReadFile,
         ];
     }
 
@@ -143,10 +130,12 @@ class AgentCommand extends Command
         foreach ($functionCalls as $call) {
             info("Running tool: {$call['name']}(...) ");
 
+            $output = $this->executeTool($call);
+
             $history[] = [
                 'type' => 'function_call_output',
                 'call_id' => $call['call_id'],
-                'output' => $this->executeToolCall($call),
+                'output' => $output,
             ];
         }
     }
@@ -154,44 +143,20 @@ class AgentCommand extends Command
     /**
      * @param  array<string, mixed>  $call
      */
-    private function executeToolCall(array $call): string
+    private function executeTool(array $call): string
     {
-        return match ($call['name'] ?? null) {
-            'get_current_time' => now()->toIso8601String(),
-            'read_file' => $this->readProjectFile($call),
-            default => sprintf('Tool [%s] is not supported.', $call['name'] ?? 'unknown'),
-        };
-    }
-
-    /**
-     * @param  array<string, mixed>  $call
-     */
-    private function readProjectFile(array $call): string
-    {
+        $toolName = $call['name'] ?? null;
         $arguments = $this->decodeArguments($call);
-        $path = $arguments['path'] ?? null;
 
-        if (! is_string($path) || trim($path) === '') {
-            return 'The "path" argument is required.';
+        foreach ($this->tools() as $tool) {
+            if ($tool->definition()['name'] === $toolName) {
+                $result = $tool->use($arguments);
+
+                return is_string($result) ? $result : json_encode($result, JSON_THROW_ON_ERROR);
+            }
         }
 
-        $resolvedPath = realpath(base_path($path));
-
-        if ($resolvedPath === false || ! is_file($resolvedPath)) {
-            return sprintf('Unable to read [%s].', $path);
-        }
-
-        if (! $this->isWithinProjectRoot($resolvedPath)) {
-            return sprintf('The path [%s] is outside the project root.', $path);
-        }
-
-        $contents = file_get_contents($resolvedPath);
-
-        if ($contents === false) {
-            return sprintf('Unable to read [%s].', $path);
-        }
-
-        return $contents;
+        return sprintf('Tool [%s] is not supported.', $toolName ?? 'unknown');
     }
 
     /**
@@ -214,30 +179,6 @@ class AgentCommand extends Command
         } catch (JsonException) {
             return [];
         }
-    }
-
-    private function isWithinProjectRoot(string $resolvedPath): bool
-    {
-        $projectRoot = realpath(base_path());
-
-        if ($projectRoot === false) {
-            return false;
-        }
-
-        $normalizedProjectRoot = $this->normalizePath($projectRoot);
-        $normalizedResolvedPath = $this->normalizePath($resolvedPath);
-
-        return $normalizedResolvedPath === $normalizedProjectRoot
-            || Str::startsWith($normalizedResolvedPath, $normalizedProjectRoot.'/');
-    }
-
-    private function normalizePath(string $path): string
-    {
-        return Str::of($path)
-            ->replace('\\', '/')
-            ->lower()
-            ->trim('/')
-            ->toString();
     }
 
     /**

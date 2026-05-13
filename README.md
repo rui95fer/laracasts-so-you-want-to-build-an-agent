@@ -584,6 +584,174 @@ This course teaches you how to build AI agents step-by-step, starting with the f
   }
   ```
 
+---
+
+## Episode 04: Extract A Tool Class
+
+### Key Lessons & Practical Examples
+
+- **Inline `if/elseif` tool conditionals do not scale; extract each tool into its own class**
+  ```php
+  // Before: each new tool adds another conditional branch in AgentCommand
+  if ($call['name'] === 'get_current_time') {
+      // ...
+  }
+
+  if ($call['name'] === 'read_file') {
+      // ...
+  }
+
+  // After: create one class per tool and register it
+  private function tools(): array
+  {
+      return [
+          new CurrentTime(),
+          new ReadFile(),
+      ];
+  }
+  ```
+
+- **Create a dedicated tools directory to group all AI tool behavior in one place**
+  ```text
+  app/
+    AI/
+      Tools/
+        Tool.php
+        CurrentTime.php
+        ReadFile.php
+  ```
+
+- **Define a `Tool` interface so all tools share a common contract**
+  ```php
+  <?php
+
+  namespace App\AI\Tools;
+
+  interface Tool
+  {
+      public function definition(): array;
+
+      public function use(array $arguments = []): mixed;
+  }
+  ```
+
+- **Move OpenAI function schema into each tool via `definition()`**
+  ```php
+  // app/AI/Tools/CurrentTime.php
+  public function definition(): array
+  {
+      return [
+          'type' => 'function',
+          'name' => 'get_current_time',
+          'description' => 'Get the current server time as an ISO string.',
+          'parameters' => [
+              'type' => 'object',
+              'properties' => [],
+              'required' => [],
+          ],
+      ];
+  }
+  ```
+
+- **Put the execution logic in `use()` so each tool handles itself**
+  ```php
+  // app/AI/Tools/CurrentTime.php
+  public function use(array $arguments = []): string
+  {
+      return now()->toIso8601String();
+  }
+  ```
+
+- **For argument-driven tools, decode AI arguments before calling `use()`**
+  ```php
+  $decodedArguments = json_decode($call['arguments'], true) ?? [];
+
+  $output = $tool->use($decodedArguments);
+  ```
+
+- **Example: a `ReadFile` tool defines its schema and reads from `base_path()`**
+  ```php
+  <?php
+
+  namespace App\AI\Tools;
+
+  class ReadFile implements Tool
+  {
+      public function definition(): array
+      {
+          return [
+              'type' => 'function',
+              'name' => 'read_file',
+              'description' => 'Read a file by relative path.',
+              'parameters' => [
+                  'type' => 'object',
+                  'properties' => [
+                      'path' => [
+                          'type' => 'string',
+                          'description' => 'Relative file path from the project root.',
+                      ],
+                  ],
+                  'required' => ['path'],
+                  'additionalProperties' => false,
+              ],
+              'strict' => true,
+          ];
+      }
+
+      public function use(array $arguments = []): string
+      {
+          return file_get_contents(base_path($arguments['path']));
+      }
+  }
+  ```
+
+- **Send tool definitions to the model, not tool objects**
+  ```php
+  'tools' => collect($this->tools())
+      ->map(fn(Tool $tool): array => $tool->definition())
+      ->values()
+      ->all(),
+  ```
+
+- **Resolve and execute tools by matching call name to the tool definition name**
+  ```php
+  foreach ($functionCalls as $call) {
+      foreach ($this->tools() as $tool) {
+          if ($tool->definition()['name'] !== $call['name']) {
+              continue;
+          }
+
+          $output = $tool->use(json_decode($call['arguments'], true) ?? []);
+
+          $history[] = [
+              'type' => 'function_call_output',
+              'call_id' => $call['call_id'],
+              'output' => $output,
+          ];
+      }
+  }
+  ```
+
+- **This refactor follows open/closed design: add a tool class + register it, no core branch edits**
+  ```text
+  Add new capability checklist:
+  1) Create class in app/AI/Tools implementing Tool
+  2) Add definition() + use()
+  3) Register it in tools()
+  4) Done (no new conditional chain)
+  ```
+
+- **End-to-end practical example: one prompt can trigger two registered tools (`read_file` twice) and then answer**
+  ```text
+  User: Read package.json and composer.json.
+  Agent internal loop:
+  - model asks for read_file(package.json)
+  - model asks for read_file(composer.json)
+  - app runs both via Tool classes
+  - app appends both function_call_output entries
+  - model returns final human-readable summary
+  ```
+
 
 
 
