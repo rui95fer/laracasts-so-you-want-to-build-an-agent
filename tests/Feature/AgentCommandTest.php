@@ -39,7 +39,60 @@ test('it returns the assistant response when no tools are requested', function (
     ]);
 
     expect(collect($firstRequest['tools'])->pluck('name')->all())
-        ->toBe(['get_current_time', 'read_file']);
+        ->toBe(['get_current_time', 'read_file', 'site_revenue']);
+});
+
+test('it runs the revenue tool before producing a final answer', function () {
+    Http::fakeSequence()
+        ->push([
+            'output' => [
+                [
+                    'type' => 'function_call',
+                    'name' => 'site_revenue',
+                    'call_id' => 'call_revenue',
+                    'arguments' => json_encode(['period' => 'quarterly'], JSON_THROW_ON_ERROR),
+                ],
+            ],
+        ])
+        ->push([
+            'output' => [
+                [
+                    'type' => 'message',
+                    'content' => [
+                        ['type' => 'output_text', 'text' => 'Quarterly revenue is 120000.'],
+                    ],
+                ],
+            ],
+        ]);
+
+    $this->artisan('agent')
+        ->expectsQuestion('What is on your mind?', 'How much did we make last quarter?')
+        ->expectsOutput('Quarterly revenue is 120000.')
+        ->expectsQuestion('What is on your mind?', 'exit')
+        ->expectsOutput('Goodbye!')
+        ->assertSuccessful();
+
+    Http::assertSentCount(2);
+
+    $requests = Http::recorded();
+
+    /** @var Request $secondRequest */
+    $secondRequest = $requests[1][0];
+
+    expect($secondRequest['input'])->toBe([
+        ['role' => 'user', 'content' => 'How much did we make last quarter?'],
+        [
+            'type' => 'function_call',
+            'name' => 'site_revenue',
+            'call_id' => 'call_revenue',
+            'arguments' => json_encode(['period' => 'quarterly'], JSON_THROW_ON_ERROR),
+        ],
+        [
+            'type' => 'function_call_output',
+            'call_id' => 'call_revenue',
+            'output' => '120000',
+        ],
+    ]);
 });
 
 test('it runs the current time tool before producing a final answer', function () {

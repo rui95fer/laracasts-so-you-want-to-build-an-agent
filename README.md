@@ -752,6 +752,99 @@ This course teaches you how to build AI agents step-by-step, starting with the f
   - model returns final human-readable summary
   ```
 
+---
+
+## Episode 05: Make a Revenue Tool
+
+### Key Lessons & Practical Examples
+
+- **Add focused business tools when the model needs app-specific data (like revenue)**
+  ```php
+  // app/Console/Commands/AgentCommand.php
+  private function tools(): array
+  {
+      return [
+          new CurrentTime(),
+          new ReadFile(),
+          new Revenue(),
+      ];
+  }
+  ```
+
+- **Use JSON Schema parameters so the model can request revenue by period**
+  ```php
+  // app/AI/Tools/Revenue.php
+  public function definition(): array
+  {
+      return [
+          'type' => 'function',
+          'name' => 'site_revenue',
+          'description' => 'Get site revenue for a period.',
+          'parameters' => [
+              'type' => 'object',
+              'properties' => [
+                  'period' => [
+                      'type' => 'string',
+                      'description' => 'Revenue period to fetch.',
+                      'enum' => ['daily', 'monthly', 'quarterly', 'yearly'],
+                  ],
+              ],
+              'required' => ['period'],
+              'additionalProperties' => false,
+          ],
+          'strict' => true,
+      ];
+  }
+  ```
+
+- **Stub tool output first to validate the agent loop before wiring a real query**
+  ```php
+  // app/AI/Tools/Revenue.php
+  public function use(array $arguments = []): string
+  {
+      return match ($arguments['period'] ?? null) {
+          'daily' => '900',
+          'monthly' => '18000',
+          'quarterly' => '120000',
+          'yearly' => '850000',
+          default => 'unknown period',
+      };
+  }
+  ```
+
+- **Keep `strict: true` + `enum` to reduce invalid arguments from the model**
+  ```text
+  With strict mode:
+  - model must send the declared shape
+  - period is required
+  - period should be one of: daily/monthly/quarterly/yearly
+  ```
+
+- **Always append tool output as a string in `function_call_output`**
+  ```php
+  $history[] = [
+      'type' => 'function_call_output',
+      'call_id' => $call['call_id'],
+      'output' => (string) $output,
+  ];
+  ```
+
+- **Practical flow: quarter question -> revenue tool -> final answer**
+  ```text
+  User: How much did we earn last quarter in revenue?
+  Agent internal step: site_revenue({"period":"quarterly"})
+  Tool output: "120000"
+  Final response: We earned $120,000 last quarter.
+  ```
+
+- **Follow-up prompts reuse the same tool with a different period**
+  ```text
+  User: What about last week?
+  Agent chooses period: daily
+  Tool output: "900"
+  Final response: Last week's revenue was $900.
+  ```
+
 
 
 

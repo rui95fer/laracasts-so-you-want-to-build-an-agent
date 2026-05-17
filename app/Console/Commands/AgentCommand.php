@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\AI\Tools\CurrentTime;
 use App\AI\Tools\ReadFile;
+use App\AI\Tools\Revenue;
 use App\AI\Tools\Tool;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -118,6 +119,7 @@ class AgentCommand extends Command
         return [
             new CurrentTime,
             new ReadFile,
+            new Revenue,
         ];
     }
 
