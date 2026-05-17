@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\AI\Agents\GeneralAgent;
+use App\AI\Agents\ChatbotAgent;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -19,10 +19,7 @@ class AgentCommand extends Command
      */
     public function handle(): int
     {
-        $agent = new GeneralAgent;
-
-        /** @var list<array<string, mixed>> $history */
-        $history = [];
+        $agent = new ChatbotAgent;
 
         while (true) {
             $prompt = text(
@@ -37,14 +34,15 @@ class AgentCommand extends Command
                 return self::SUCCESS;
             }
 
-            $history[] = [
-                'role' => 'user',
-                'content' => $prompt,
-            ];
+            $response = $agent->prompt($prompt);
 
-            $response = $agent->run($history);
+            if (is_array($response)) {
+                $this->info((string) ($response['response'] ?? json_encode($response, JSON_THROW_ON_ERROR)));
 
-            $this->info($response->text);
+                continue;
+            }
+
+            $this->info((string) $response);
         }
     }
 }

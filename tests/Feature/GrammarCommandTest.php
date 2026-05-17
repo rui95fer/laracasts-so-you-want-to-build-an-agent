@@ -3,84 +3,51 @@
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 
-function grammarPayload(bool $hasErrors, string $correctedText, array $corrections = []): string
+function grammarPayload(array $nouns, array $adjectives, array $verbs): string
 {
     return json_encode([
-        'has_errors' => $hasErrors,
-        'corrected_text' => $correctedText,
-        'corrections' => $corrections,
+        'nouns' => $nouns,
+        'adjectives' => $adjectives,
+        'verbs' => $verbs,
     ], JSON_THROW_ON_ERROR);
 }
 
-test('it reports no errors when the text is correct', function () {
+test('it outputs structured grammar extraction json', function () {
     Http::fakeSequence()->push([
         'output' => [
             [
                 'type' => 'message',
                 'content' => [
-                    ['type' => 'output_text', 'text' => grammarPayload(false, 'She went to the store.', [])],
+                    ['type' => 'output_text', 'text' => grammarPayload(['fox', 'dog'], ['quick', 'brown', 'lazy'], ['jumps'])],
                 ],
             ],
         ],
     ]);
 
     $this->artisan('grammar')
-        ->expectsQuestion('Enter text to check', 'She went to the store.')
-        ->expectsOutput('✓ No grammar errors found!')
-        ->expectsQuestion('Enter text to check', 'exit')
+        ->expectsQuestion('Enter sentence', 'The quick brown fox jumps over the lazy dog.')
+        ->expectsQuestion('Enter sentence', 'exit')
         ->expectsOutput('Goodbye!')
         ->assertSuccessful();
 
     Http::assertSentCount(1);
 });
 
-test('it displays corrected text and a corrections table', function () {
+test('it sends instructions and a strict json schema format in the request', function () {
     Http::fakeSequence()->push([
         'output' => [
             [
                 'type' => 'message',
                 'content' => [
-                    [
-                        'type' => 'output_text',
-                        'text' => grammarPayload(true, 'She went to the store.', [
-                            [
-                                'original' => 'goed',
-                                'corrected' => 'went',
-                                'explanation' => '"Goed" is not a word; past tense of "go" is "went".',
-                            ],
-                        ]),
-                    ],
+                    ['type' => 'output_text', 'text' => grammarPayload(['world'], [], ['hello'])],
                 ],
             ],
         ],
     ]);
 
     $this->artisan('grammar')
-        ->expectsQuestion('Enter text to check', 'She goed to the store.')
-        ->expectsOutput('Corrected text:')
-        ->expectsOutput('She went to the store.')
-        ->expectsQuestion('Enter text to check', 'exit')
-        ->expectsOutput('Goodbye!')
-        ->assertSuccessful();
-
-    Http::assertSentCount(1);
-});
-
-test('it sends the system prompt and json_schema format in the request', function () {
-    Http::fakeSequence()->push([
-        'output' => [
-            [
-                'type' => 'message',
-                'content' => [
-                    ['type' => 'output_text', 'text' => grammarPayload(false, 'Hello world.', [])],
-                ],
-            ],
-        ],
-    ]);
-
-    $this->artisan('grammar')
-        ->expectsQuestion('Enter text to check', 'Hello world.')
-        ->expectsQuestion('Enter text to check', 'exit')
+        ->expectsQuestion('Enter sentence', 'Hello world')
+        ->expectsQuestion('Enter sentence', 'exit')
         ->assertSuccessful();
 
     Http::assertSentCount(1);
@@ -91,21 +58,21 @@ test('it sends the system prompt and json_schema format in the request', functio
     $request = $requests[0][0];
 
     expect($request['input'])->toBe([
-        ['role' => 'user', 'content' => 'Hello world.'],
+        ['role' => 'user', 'content' => 'Hello world'],
     ]);
 
+    expect($request['instructions'])->toContain('Extract nouns, adjectives, and verbs');
     expect($request['text']['format']['type'])->toBe('json_schema');
-    expect($request['text']['format']['name'])->toBe('grammar_check');
     expect($request['text']['format']['strict'])->toBeTrue();
-
-    expect($request)->not->toHaveKey('tools');
+    expect($request['text']['format']['schema']['required'])->toBe(['nouns', 'adjectives', 'verbs']);
+    expect($request['tools'])->toBe([]);
 });
 
 test('it exits immediately without calling the model', function () {
     Http::fake();
 
     $this->artisan('grammar')
-        ->expectsQuestion('Enter text to check', 'exit')
+        ->expectsQuestion('Enter sentence', 'exit')
         ->expectsOutput('Goodbye!')
         ->assertSuccessful();
 

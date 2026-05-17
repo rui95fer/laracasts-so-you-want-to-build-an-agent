@@ -8,13 +8,20 @@ afterEach(function () {
     CarbonImmutable::setTestNow();
 });
 
+function chatbotPayload(string $response): string
+{
+    return json_encode([
+        'response' => $response,
+    ], JSON_THROW_ON_ERROR);
+}
+
 test('it returns the assistant response when no tools are requested', function () {
     Http::fakeSequence()->push([
         'output' => [
             [
                 'type' => 'message',
                 'content' => [
-                    ['type' => 'output_text', 'text' => 'Hello from the agent.'],
+                    ['type' => 'output_text', 'text' => chatbotPayload('Hello from the agent.')],
                 ],
             ],
         ],
@@ -40,6 +47,9 @@ test('it returns the assistant response when no tools are requested', function (
 
     expect(collect($firstRequest['tools'])->pluck('name')->all())
         ->toBe(['get_current_time', 'read_file', 'site_revenue']);
+
+    expect($firstRequest['text']['format']['type'])->toBe('json_schema');
+    expect($firstRequest['text']['format']['schema']['required'])->toBe(['response']);
 });
 
 test('it runs the revenue tool before producing a final answer', function () {
@@ -59,7 +69,7 @@ test('it runs the revenue tool before producing a final answer', function () {
                 [
                     'type' => 'message',
                     'content' => [
-                        ['type' => 'output_text', 'text' => 'Quarterly revenue is 120000.'],
+                        ['type' => 'output_text', 'text' => chatbotPayload('Quarterly revenue is 120000.')],
                     ],
                 ],
             ],
@@ -114,7 +124,7 @@ test('it runs the current time tool before producing a final answer', function (
                 [
                     'type' => 'message',
                     'content' => [
-                        ['type' => 'output_text', 'text' => 'It is 2026-05-13T12:34:56+00:00.'],
+                        ['type' => 'output_text', 'text' => chatbotPayload('It is 2026-05-13T12:34:56+00:00.')],
                     ],
                 ],
             ],
@@ -184,7 +194,7 @@ test('it supports multiple tool calls in a single model response', function () {
                 [
                     'type' => 'message',
                     'content' => [
-                        ['type' => 'output_text', 'text' => 'I checked both tools.'],
+                        ['type' => 'output_text', 'text' => chatbotPayload('I checked both tools.')],
                     ],
                 ],
             ],

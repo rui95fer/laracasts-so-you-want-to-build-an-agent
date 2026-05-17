@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\AI\Agents\GrammarAgent;
+use App\AI\Agents\GrammarAssistantAgent;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -10,7 +10,7 @@ use Illuminate\Console\Command;
 use function Laravel\Prompts\text;
 
 #[Signature('grammar')]
-#[Description('Check and correct grammar in your text')]
+#[Description('Extract nouns, adjectives, and verbs from text')]
 class GrammarCommand extends Command
 {
     /**
@@ -18,12 +18,12 @@ class GrammarCommand extends Command
      */
     public function handle(): int
     {
-        $agent = new GrammarAgent;
+        $agent = new GrammarAssistantAgent;
 
         while (true) {
             $input = text(
-                label: 'Enter text to check',
-                placeholder: 'Type your text... (type "exit" to quit)',
+                label: 'Enter sentence',
+                placeholder: 'Type your sentence... (type "exit" to quit)',
                 required: true,
             );
 
@@ -33,55 +33,15 @@ class GrammarCommand extends Command
                 return self::SUCCESS;
             }
 
-            /** @var list<array<string, mixed>> $history */
-            $history = [
-                ['role' => 'user', 'content' => $input],
-            ];
+            $response = $agent->prompt($input);
 
-            $response = $agent->run($history);
+            if (is_array($response)) {
+                $this->info(json_encode($response, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 
-            if ($response->isStructured) {
-                $this->displayGrammarResult($response->data);
-            } else {
-                $this->info($response->text);
+                continue;
             }
-        }
-    }
 
-    /**
-     * Render a grammar check result to the console.
-     *
-     * @param  array<string, mixed>  $data
-     */
-    private function displayGrammarResult(array $data): void
-    {
-        $hasErrors = $data['has_errors'] ?? false;
-        $correctedText = $data['corrected_text'] ?? '';
-
-        /** @var list<array{original: string, corrected: string, explanation: string}> $corrections */
-        $corrections = $data['corrections'] ?? [];
-
-        if (! $hasErrors) {
-            $this->info('✓ No grammar errors found!');
-
-            return;
-        }
-
-        $this->line('');
-        $this->info('Corrected text:');
-        $this->line($correctedText);
-
-        if ($corrections !== []) {
-            $this->line('');
-            $this->info('Corrections:');
-            $this->table(
-                ['Original', 'Corrected', 'Explanation'],
-                array_map(fn (array $correction): array => [
-                    $correction['original'] ?? '',
-                    $correction['corrected'] ?? '',
-                    $correction['explanation'] ?? '',
-                ], $corrections),
-            );
+            $this->info((string) $response);
         }
     }
 }

@@ -33,14 +33,10 @@ class ToolRunner
     public function runAll(Collection $functionCalls, array &$history): void
     {
         foreach ($functionCalls as $call) {
-            info("Running tool: {$call['name']}(...) ");
-
-            $output = $this->execute($call);
-
             $history[] = [
                 'type' => 'function_call_output',
                 'call_id' => $call['call_id'],
-                'output' => $output,
+                'output' => $this->runTool($call),
             ];
         }
     }
@@ -48,20 +44,24 @@ class ToolRunner
     /**
      * @param  array<string, mixed>  $call
      */
-    public function execute(array $call): string
+    public function runTool(array $call): string
     {
-        $toolName = $call['name'] ?? null;
+        $toolName = $call['name'] ?? 'unknown';
+        info("Running tool: {$toolName}(...) ");
+
         $arguments = $this->decodeArguments($call);
 
         foreach ($this->tools as $tool) {
-            if ($tool->definition()['name'] === $toolName) {
-                $result = $tool->use($arguments);
-
-                return is_string($result) ? $result : json_encode($result, JSON_THROW_ON_ERROR);
+            if ($tool->definition()['name'] !== $toolName) {
+                continue;
             }
+
+            $result = $tool->use($arguments);
+
+            return is_string($result) ? $result : json_encode($result, JSON_THROW_ON_ERROR);
         }
 
-        return sprintf('Tool [%s] is not supported.', $toolName ?? 'unknown');
+        return sprintf('Tool [%s] is not supported.', $toolName);
     }
 
     /**

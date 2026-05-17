@@ -11,52 +11,49 @@ use function Laravel\Prompts\spin;
 abstract class Agent
 {
     /**
+     * @var list<array<string, mixed>>
+     */
+    public array $history = [];
+
+    /**
      * @return list<Tool>
      */
     abstract protected function tools(): array;
 
-    protected function systemPrompt(): ?string
-    {
-        return null;
-    }
-
     /**
-     * Returns the JSON schema definition for structured output, or null for plain text.
-     *
      * @return array<string, mixed>|null
      */
-    protected function outputSchema(): ?array
+    abstract protected function schema(): ?array;
+
+    protected function instructions(): ?string
     {
         return null;
     }
 
-    /**
-     * Run the agent loop and return a typed response.
-     *
-     * @param  list<array<string, mixed>>  $history
-     */
-    public function run(array &$history): AgentResponse
+    public function prompt(string $prompt): mixed
     {
-        return $this->runAgentLoop($history);
+        $this->history[] = [
+            'role' => 'user',
+            'content' => $prompt,
+        ];
+
+        return $this->run();
     }
 
-    /**
-     * @param  list<array<string, mixed>>  $history
-     */
-    private function runAgentLoop(array &$history): AgentResponse
+    protected function run(): mixed
     {
         $toolRunner = new ToolRunner($this->tools());
 
         while (true) {
             $response = spin(
-                callback: fn () => $this->runModel($history),
+                callback: fn () => $this->runModel(),
                 message: 'Thinking about that...',
             );
 
             $output = $response['output'] ?? [];
 
-            $history = [
-                ...$history,
+            $this->history = [
+                ...$this->history,
                 ...$output,
             ];
 
@@ -68,54 +65,47 @@ abstract class Agent
                 return $this->extractResponse($output);
             }
 
-            $toolRunner->runAll($functionCalls, $history);
+            $toolRunner->runAll($functionCalls, $this->history);
         }
     }
 
     /**
-     * @param  list<array<string, mixed>>  $history
      * @return array{output?: list<array<string, mixed>>}
      */
-    private function runModel(array $history): array
+    protected function runModel(): array
     {
         return Http::withToken(config('services.openai.key'))
             ->connectTimeout(10)
             ->timeout(30)
-            ->post('https://api.openai.com/v1/responses', $this->buildRequestPayload($history))
+            ->post('https://api.openai.com/v1/responses', $this->buildRequestPayload())
             ->throw()
             ->json();
     }
 
     /**
-     * Build the full API request payload, including optional system prompt,
-     * tool definitions, and structured output schema.
-     *
-     * @param  list<array<string, mixed>>  $history
      * @return array<string, mixed>
      */
-    protected function buildRequestPayload(array $history): array
+    protected function buildRequestPayload(): array
     {
         $payload = [
             'model' => config('services.openai.model', 'gpt-5.4-nano'),
-            'input' => $history,
+            'input' => $this->history,
+            'tools' => (new ToolRunner($this->tools()))->definitions(),
         ];
 
-        $systemPrompt = $this->systemPrompt();
-        if ($systemPrompt !== null) {
-            $payload['instructions'] = $systemPrompt;
+        $instructions = $this->instructions();
+        if ($instructions !== null) {
+            $payload['instructions'] = $instructions;
         }
 
-        $toolDefinitions = (new ToolRunner($this->tools()))->definitions();
-        if ($toolDefinitions !== []) {
-            $payload['tools'] = $toolDefinitions;
-        }
-
-        $schema = $this->outputSchema();
+        $schema = $this->schema();
         if ($schema !== null) {
             $payload['text'] = [
                 'format' => [
                     'type' => 'json_schema',
-                    ...$schema,
+                    'name' => 'agent_response',
+                    'strict' => true,
+                    'schema' => $schema,
                 ],
             ];
         }
@@ -124,35 +114,32 @@ abstract class Agent
     }
 
     /**
-     * Convert the raw output array into a typed AgentResponse.
-     * Decodes JSON automatically when an output schema is configured.
-     *
      * @param  list<array<string, mixed>>  $output
      */
-    protected function extractResponse(array $output): AgentResponse
+    protected function extractResponse(array $output): mixed
     {
         $text = $this->extractText($output);
 
-        if ($this->outputSchema() !== null) {
-            try {
-                /** @var array<string, mixed> $data */
-                $data = json_decode($text, true, flags: JSON_THROW_ON_ERROR);
-
-                return AgentResponse::structured($data);
-            } catch (JsonException) {
-                // Fall through to plain text response
-            }
+        if ($this->schema() === null) {
+            return $text;
         }
 
-        return AgentResponse::text($text);
+        try {
+            /** @var array<string, mixed> $decoded */
+            $decoded = json_decode($text, true, flags: JSON_THROW_ON_ERROR);
+
+            return $decoded;
+        } catch (JsonException) {
+            return [
+                'response' => $text,
+            ];
+        }
     }
 
     /**
-     * Extract the plain text from a model output array.
-     *
      * @param  list<array<string, mixed>>  $output
      */
-    private function extractText(array $output): string
+    protected function extractText(array $output): string
     {
         $message = collect($output)->first(fn (array $item): bool => ($item['type'] ?? null) === 'message');
 
