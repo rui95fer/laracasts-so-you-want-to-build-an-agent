@@ -845,6 +845,160 @@ This course teaches you how to build AI agents step-by-step, starting with the f
   Final response: Last week's revenue was $900.
   ```
 
+---
+
+## Episode 06: Structured Output
+
+### Key Lessons & Practical Examples
+
+- **Different agents can require different response shapes, so structured output belongs at the agent level**
+  ```php
+  // Chatbot agent: one simple response string
+  'schema' => [
+      'type' => 'object',
+      'properties' => [
+          'response' => [
+              'type' => 'string',
+          ],
+      ],
+      'required' => ['response'],
+      'additionalProperties' => false,
+  ],
+  ```
+
+- **Send structured output in the request with strict mode so the model must obey the schema**
+  ```php
+  return Http::withToken(config('services.openai.key'))
+      ->post('https://api.openai.com/v1/responses', [
+          'model' => 'gpt-5.4-nano',
+          'input' => $this->history,
+          'tools' => collect($this->tools())
+              ->map(fn(Tool $tool): array => $tool->definition())
+              ->values()
+              ->all(),
+          'text' => [
+              'format' => [
+                  'type' => 'json_schema',
+                  'name' => 'agent_response',
+                  'strict' => true,
+                  'schema' => $this->schema(),
+              ],
+          ],
+      ])
+      ->throw()
+      ->json();
+  ```
+
+- **Refactor tool execution into a reusable method so the command stays small**
+  ```php
+  private function runTool(array $call): void
+  {
+      foreach ($this->tools() as $tool) {
+          if ($tool->definition()['name'] !== $call['name']) {
+              continue;
+          }
+
+          $this->history[] = [
+              'type' => 'function_call_output',
+              'call_id' => $call['call_id'],
+              'output' => (string) $tool->use(json_decode($call['arguments'], true) ?? []),
+          ];
+      }
+  }
+  ```
+
+- **A base `Agent` class can own history, tools, schema, instructions, and the model request**
+  ```php
+  abstract class Agent
+  {
+      public array $history = [];
+
+      public function prompt(string $prompt): mixed
+      {
+          $this->history[] = [
+              'role' => 'user',
+              'content' => $prompt,
+          ];
+
+          return $this->run();
+      }
+
+      abstract protected function schema(): ?array;
+      abstract protected function tools(): array;
+  }
+  ```
+
+- **Create a dedicated chatbot agent for conversational output and a separate grammar agent for extracted data**
+  ```php
+  // app/AI/Agents/ChatbotAgent.php
+  protected function schema(): ?array
+  {
+      return [
+          'type' => 'object',
+          'properties' => [
+              'response' => ['type' => 'string'],
+          ],
+          'required' => ['response'],
+          'additionalProperties' => false,
+      ];
+  }
+
+  // app/AI/Agents/GrammarAssistantAgent.php
+  protected function schema(): ?array
+  {
+      return [
+          'type' => 'object',
+          'properties' => [
+              'nouns' => [
+                  'type' => 'array',
+                  'items' => ['type' => 'string'],
+              ],
+              'adjectives' => [
+                  'type' => 'array',
+                  'items' => ['type' => 'string'],
+              ],
+              'verbs' => [
+                  'type' => 'array',
+                  'items' => ['type' => 'string'],
+              ],
+          ],
+          'required' => ['nouns', 'adjectives', 'verbs'],
+          'additionalProperties' => false,
+      ];
+  }
+  ```
+
+- **Use the agent from a command by instantiating the right class, then passing the prompt into it**
+  ```php
+  // app/Console/Commands/AgentCommand.php
+  $agent = new GrammarAssistantAgent();
+  $response = $agent->prompt($sentence);
+
+  $this->info(json_encode($response));
+  ```
+
+- **Structured output makes the response programmatic instead of free-form text**
+  ```text
+  Chatbot agent:
+  { "response": "Hello!" }
+
+  Grammar agent:
+  {
+    "nouns": ["dog", "house", "car"],
+    "adjectives": ["big", "brown", "green"],
+    "verbs": ["jumps", "landed"]
+  }
+  ```
+
+- **The main payoff is determinism: your app can trust the shape and use it directly**
+  ```php
+  $data = json_decode($response, true);
+
+  foreach ($data['nouns'] as $noun) {
+      // store or display nouns reliably
+  }
+  ```
+
 
 
 
