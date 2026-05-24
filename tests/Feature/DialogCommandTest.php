@@ -6,17 +6,29 @@ use Illuminate\Support\Facades\Http;
 test('it keeps conversation history across turns', function () {
     Http::fakeSequence()
         ->push([
-            'content' => [
-                ['text' => 'Nice to meet you, Sam.'],
+            'output' => [
+                [
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'content' => [
+                        ['type' => 'output_text', 'text' => 'Nice to meet you, Sam.'],
+                    ],
+                ],
             ],
         ])
         ->push([
-            'content' => [
-                ['text' => 'Your name is Sam.'],
+            'output' => [
+                [
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'content' => [
+                        ['type' => 'output_text', 'text' => 'Your name is Sam.'],
+                    ],
+                ],
             ],
         ]);
 
-    $this->artisan('dialog')
+    $this->artisan('dialogue')
         ->expectsQuestion('What is on your mind?', 'My name is Sam.')
         ->expectsOutput('Nice to meet you, Sam.')
         ->expectsQuestion('What is on your mind?', 'What is my name?')
@@ -32,16 +44,23 @@ test('it keeps conversation history across turns', function () {
     /** @var Request $firstRequest */
     $firstRequest = $requests[0][0];
 
-    expect($firstRequest['messages'])->toBe([
+    expect($firstRequest->url())->toBe('https://api.openai.com/v1/responses');
+    expect($firstRequest['input'])->toBe([
         ['role' => 'user', 'content' => 'My name is Sam.'],
     ]);
 
     /** @var Request $secondRequest */
     $secondRequest = $requests[1][0];
 
-    expect($secondRequest['messages'])->toBe([
+    expect($secondRequest['input'])->toBe([
         ['role' => 'user', 'content' => 'My name is Sam.'],
-        ['role' => 'assistant', 'content' => 'Nice to meet you, Sam.'],
+        [
+            'type' => 'message',
+            'role' => 'assistant',
+            'content' => [
+                ['type' => 'output_text', 'text' => 'Nice to meet you, Sam.'],
+            ],
+        ],
         ['role' => 'user', 'content' => 'What is my name?'],
     ]);
 });
@@ -49,7 +68,7 @@ test('it keeps conversation history across turns', function () {
 test('it exits without calling anthropic when user types exit immediately', function () {
     Http::fake();
 
-    $this->artisan('dialog')
+    $this->artisan('dialogue')
         ->expectsQuestion('What is on your mind?', 'exit')
         ->expectsOutput('Goodbye!')
         ->assertSuccessful();

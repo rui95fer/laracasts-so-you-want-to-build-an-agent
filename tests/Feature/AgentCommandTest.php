@@ -46,7 +46,16 @@ test('it returns the assistant response when no tools are requested', function (
     ]);
 
     expect(collect($firstRequest['tools'])->pluck('name')->all())
-        ->toBe(['get_current_time', 'read_file', 'site_revenue']);
+        ->toBe([
+            'get_current_time',
+            'read_file',
+            'site_revenue',
+            'write_file',
+            'run_bash_script',
+            'list_files',
+            'glob_files',
+            'search_in_files',
+        ]);
 
     expect($firstRequest['text']['format']['type'])->toBe('json_schema');
     expect($firstRequest['text']['format']['schema']['required'])->toBe(['response']);
@@ -243,6 +252,101 @@ test('it supports multiple tool calls in a single model response', function () {
             'output' => 'Agent notes go here.',
         ],
     ]);
+});
+
+test('it runs the write file tool before producing a final answer', function () {
+    $relativePath = 'storage/framework/testing/agent-write-file.txt';
+
+    Http::fakeSequence()
+        ->push([
+            'output' => [
+                [
+                    'type' => 'function_call',
+                    'name' => 'write_file',
+                    'call_id' => 'call_write_file',
+                    'arguments' => json_encode([
+                        'path' => $relativePath,
+                        'content' => 'hello from tool',
+                    ], JSON_THROW_ON_ERROR),
+                ],
+            ],
+        ])
+        ->push([
+            'output' => [
+                [
+                    'type' => 'message',
+                    'content' => [
+                        ['type' => 'output_text', 'text' => chatbotPayload('File written.')],
+                    ],
+                ],
+            ],
+        ]);
+
+    try {
+        $this->artisan('agent')
+            ->expectsQuestion('What is on your mind?', 'Create a file for me')
+            ->expectsOutput('File written.')
+            ->expectsQuestion('What is on your mind?', 'exit')
+            ->expectsOutput('Goodbye!')
+            ->assertSuccessful();
+
+        expect(file_get_contents(base_path($relativePath)))->toBe('hello from tool');
+    } finally {
+        @unlink(base_path($relativePath));
+    }
+
+    Http::assertSentCount(2);
+
+    $requests = Http::recorded();
+
+    /** @var Request $secondRequest */
+    $secondRequest = $requests[1][0];
+
+    expect($secondRequest['input'][2]['call_id'])->toBe('call_write_file');
+    expect($secondRequest['input'][2]['output'])->toBe('Wrote 15 bytes to [storage/framework/testing/agent-write-file.txt].');
+});
+
+test('it runs the bash script tool before producing a final answer', function () {
+    Http::fakeSequence()
+        ->push([
+            'output' => [
+                [
+                    'type' => 'function_call',
+                    'name' => 'run_bash_script',
+                    'call_id' => 'call_run_bash',
+                    'arguments' => json_encode([
+                        'command' => 'php artisan --version',
+                    ], JSON_THROW_ON_ERROR),
+                ],
+            ],
+        ])
+        ->push([
+            'output' => [
+                [
+                    'type' => 'message',
+                    'content' => [
+                        ['type' => 'output_text', 'text' => chatbotPayload('I checked the Laravel version.')],
+                    ],
+                ],
+            ],
+        ]);
+
+    $this->artisan('agent')
+        ->expectsQuestion('What is on your mind?', 'What Laravel version is this?')
+        ->expectsOutput('I checked the Laravel version.')
+        ->expectsQuestion('What is on your mind?', 'exit')
+        ->expectsOutput('Goodbye!')
+        ->assertSuccessful();
+
+    Http::assertSentCount(2);
+
+    $requests = Http::recorded();
+
+    /** @var Request $secondRequest */
+    $secondRequest = $requests[1][0];
+
+    expect($secondRequest['input'][2]['call_id'])->toBe('call_run_bash');
+    expect($secondRequest['input'][2]['output'])->toContain('Laravel Framework');
 });
 
 test('it exits immediately without calling the model', function () {

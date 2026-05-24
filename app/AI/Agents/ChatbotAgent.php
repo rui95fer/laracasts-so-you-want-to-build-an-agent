@@ -4,9 +4,14 @@ namespace App\AI\Agents;
 
 use App\AI\Agent;
 use App\AI\Tools\CurrentTime;
+use App\AI\Tools\GlobFiles;
+use App\AI\Tools\ListFiles;
 use App\AI\Tools\ReadFile;
 use App\AI\Tools\Revenue;
+use App\AI\Tools\RunBashScript;
+use App\AI\Tools\SearchInFiles;
 use App\AI\Tools\Tool;
+use App\AI\Tools\WriteFile;
 
 class ChatbotAgent extends Agent
 {
@@ -19,6 +24,11 @@ class ChatbotAgent extends Agent
             new CurrentTime,
             new ReadFile,
             new Revenue,
+            new WriteFile,
+            new RunBashScript,
+            new ListFiles,
+            new GlobFiles,
+            new SearchInFiles,
         ];
     }
 

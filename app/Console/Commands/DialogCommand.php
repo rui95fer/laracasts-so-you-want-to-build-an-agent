@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\Http;
 use function Laravel\Prompts\spin;
 use function Laravel\Prompts\text;
 
-#[Signature('dialog')]
-#[Description('Have a dialog with Claude')]
+#[Signature('dialogue')]
+#[Description('Have a dialogue with OpenAI')]
 class DialogCommand extends Command
 {
     /**
@@ -19,7 +19,7 @@ class DialogCommand extends Command
      */
     public function handle(): int
     {
-        /** @var array<int, array{role: string, content: string}> $history */
+        /** @var list<array<string, mixed>> $history */
         $history = [];
 
         while (true) {
@@ -40,45 +40,34 @@ class DialogCommand extends Command
                 'content' => $prompt,
             ];
 
-            $assistantMessage = spin(
-                callback: fn () => $this->callClaude($history),
+            $response = spin(
+                callback: fn () => $this->runModel($history),
                 message: 'Thinking about that...'
             );
 
-            $history[] = [
-                'role' => 'assistant',
-                'content' => $assistantMessage,
-            ];
+            $history = [...$history, ...($response['output'] ?? [])];
 
-            $this->info($assistantMessage);
+            $this->info((string) ($response['output'][0]['content'][0]['text'] ?? 'No text response returned.'));
         }
 
         return self::SUCCESS;
     }
 
     /**
-     * Call Claude API via Anthropic.
+     * Call the OpenAI Responses API.
+     *
+     * @param  list<array<string, mixed>>  $history
+     * @return array{output?: list<array<string, mixed>>}
      */
-    /**
-     * @param  array<int, array{role: string, content: string}>  $history
-     */
-    private function callClaude(array $history): string
+    private function runModel(array $history): array
     {
-        try {
-            $response = Http::withHeader('x-api-key', config('services.anthropic.key'))
-                ->withHeader('anthropic-version', '2023-06-01')
-                ->post('https://api.anthropic.com/v1/messages', [
-                    'model' => 'claude-3-5-haiku-20241022',
-                    'max_tokens' => 1024,
-                    'system' => 'You are a helpful assistant.',
-                    'messages' => $history,
-                ])
-                ->throw()
-                ->json();
-
-            return $response['content'][0]['text'] ?? 'No text response returned.';
-        } catch (\Exception $e) {
-            throw new \RuntimeException("Failed to call Claude API: {$e->getMessage()}");
-        }
+        return Http::withToken(config('services.openai.key'))
+            ->post('https://api.openai.com/v1/responses', [
+                'model' => config('services.openai.model', 'gpt-5.4-nano'),
+                'instructions' => 'You are a helpful assistant.',
+                'input' => $history,
+            ])
+            ->throw()
+            ->json();
     }
 }

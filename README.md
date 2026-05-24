@@ -1,805 +1,298 @@
-# So You Want to Build an Agent - Course Notes
+# Laracasts - So You Want to Build an Agent
 
-A comprehensive guide to building AI agents with Laravel, based on the Laracasts course.
+## Episode 01 — Your First AI Response
 
-## Course Overview
-
-This course teaches you how to build AI agents step-by-step, starting with the fundamentals of prompting AI and receiving responses, through to building complex agents that can perform tasks autonomously.
-
----
-
-## Episode 01: Your First AI Response
-
-### Key Lessons & Practical Examples
-
-- **AI interaction is just a simple HTTP request with the right token and parameters**
-  ```bash
-  # Basic pattern:
-  Http::withToken(config('services.openai.key'))
-      ->post('https://api.openai.com/v1/chat/completions', [
-          'model' => 'gpt-4-turbo-mini',
-          'messages' => [...]
+- **Prompt AI via HTTP request with your API token, endpoint, and parameters.**
+  ```php
+  $response = Http::withToken(config('services.openai.key'))
+      ->post('https://api.openai.com/v1/responses', [
+          'model' => 'gpt-5.4-nano',
+          'instructions' => 'You are a helpful assistant.',
+          'input' => [['role' => 'user', 'content' => 'How are you today?']],
       ])
       ->throw()
       ->json();
   ```
 
-- **Store API keys securely in .env and access them via config()**
+- **Store API keys in `.env` and access them via `config()` in your services config.**
   ```env
   OPENAI_API_KEY=your_api_key_here
   ```
   ```php
-  // In config/services.php
-  'openai' => [
-      'key' => env('OPENAI_API_KEY'),
-  ],
-  
-  // Access anywhere
-  config('services.openai.key')
+  // config/services.php
+  'openai' => ['key' => env('OPENAI_API_KEY')];
   ```
 
-- **Create an Artisan command to interact with AI**
-  ```bash
-  php artisan make:command ChatCommand
-  ```
+- **Use Laravel Prompts `text()` to collect dynamic user input from CLI commands.**
   ```php
-  // In app/Console/Commands/ChatCommand.php
-  class ChatCommand extends Command
-  {
-      protected $signature = 'chat';
-      protected $description = 'Chat with an AI model';
-      
-      public function handle()
-      {
-          $prompt = text(label: 'What is on your mind?', required: true);
-          $response = $this->runModel($prompt);
-          $this->info($response);
-      }
-  }
+  $prompt = text(label: 'What is on your mind?', required: true);
   ```
 
-- **Use Laravel Prompts for elegant CLI input/output**
-  ```bash
-  composer require laravel/prompts
-  ```
+- **Wrap async API calls with `spin()` to show visual feedback while waiting.**
   ```php
-  use function Laravel\Prompts\text;
-  
-  $prompt = text(
-      label: 'What is on your mind?',
-      placeholder: 'Enter your question...',
-      required: true,
-  );
-  ```
-
-- **Provide user feedback while waiting for AI responses with spin()**
-  ```php
-  use function Laravel\Prompts\spin;
-  
   $response = spin(
-      callback: fn() => $this->runModel($prompt),
+      callback: fn () => $this->runModel($prompt),
       message: 'Thinking about that...'
   );
   ```
 
-- **Understand OpenAI response structure before extracting data**
+- **Extract the response text from nested array: `output[0]['content'][0]['text']`.**
   ```php
-  // Response path: response['choices'][0]['message']['content']
-  $response = Http::withToken(config('services.openai.key'))
-      ->post('https://api.openai.com/v1/chat/completions', [
-          'model' => 'gpt-4-turbo-mini',
-          'messages' => [
-              ['role' => 'system', 'content' => 'You are a helpful assistant.'],
-              ['role' => 'user', 'content' => $prompt]
-          ]
-      ])
-      ->throw()
-      ->json();
-  
-  $textContent = $response['choices'][0]['message']['content'];
+  $text = $response['output'][0]['content'][0]['text'];
+  $this->info($text);
   ```
 
-- **Pass system instructions to guide the AI's behavior**
+- **Move HTTP logic into a separate method like `runModel()` to keep commands clean.**
   ```php
-  'messages' => [
-      [
-          'role' => 'system',
-          'content' => 'You are a helpful assistant. Format all responses for a first grader to understand.'
-      ],
-      ['role' => 'user', 'content' => $prompt]
-  ]
-  ```
-
-- **Be aware that responses can contain tool calls, not just text**
-  - The first item in output could be a tool call instead of text
-  - Later episodes will handle this properly
-  - For now, naively assume the first item is always text
-
-- **Complete working example: Basic chat command**
-  ```php
-  <?php
-  
-  namespace App\Console\Commands;
-  
-  use Illuminate\Console\Command;
-  use Illuminate\Support\Facades\Http;
-  use function Laravel\Prompts\text;
-  use function Laravel\Prompts\spin;
-  
-  class ChatCommand extends Command
-  {
-      protected $signature = 'chat';
-      protected $description = 'Chat with an AI model';
-  
-      public function handle()
-      {
-          $prompt = text(label: 'What is on your mind?', required: true);
-          
-          $response = spin(
-              callback: fn() => $this->runModel($prompt),
-              message: 'Thinking about that...'
-          );
-          
-          $this->info($response);
-      }
-  
-      private function runModel(string $prompt): string
-      {
-          $response = Http::withToken(config('services.openai.key'))
-              ->post('https://api.openai.com/v1/chat/completions', [
-                  'model' => 'gpt-4-turbo-mini',
-                  'messages' => [
-                      ['role' => 'system', 'content' => 'You are a helpful assistant.'],
-                      ['role' => 'user', 'content' => $prompt]
-                  ]
-              ])
-              ->throw()
-              ->json();
-          
-          return $response['choices'][0]['message']['content'];
-      }
-  }
-  ```
-  
-  Usage:
-  ```bash
-  php artisan chat
-  # What is on your mind? What is 2 + 2?
-  # Thinking about that...
-  # The answer is 4.
-  ```
-
----
-
-## Episode 02: Have A Dialog
-
-### Key Lessons & Practical Examples
-
-- **Rename the command from `chat` to `dialogue` to reflect ongoing conversation**
-  ```php
-  // Before
-  protected $signature = 'chat';
-  protected $description = 'Chat with an AI model';
-
-  // After
-  protected $signature = 'dialogue';
-  protected $description = 'Converse with OpenAI';
-  ```
-
-- **Track conversation history as the source of truth**
-  ```php
-  /** @var array<int, array{role: string, content: string}> $history */
-  $history = [];
-  ```
-
-- **Append each user prompt to history before calling the model**
-  ```php
-  $prompt = text(label: 'What is on your mind?', required: true);
-
-  $history[] = [
-      'role' => 'user',
-      'content' => $prompt,
-  ];
-  ```
-
-- **Send full history as input so the model keeps context**
-  ```php
-  $response = $this->runModel($history);
-  ```
-  ```php
-  private function runModel(array $input): array
+  private function runModel(string $prompt): array
   {
       return Http::withToken(config('services.openai.key'))
           ->post('https://api.openai.com/v1/responses', [
               'model' => 'gpt-5.4-nano',
-              'input' => $input,
+              'instructions' => 'You are a helpful assistant.',
+              'input' => [['role' => 'user', 'content' => $prompt]],
           ])
           ->throw()
           ->json();
   }
   ```
 
-- **Append AI output back into history to continue the dialog**
+## Episode 02 — Have A Dialog
+
+- **Rename your command signature to `dialogue` when the command enables ongoing conversation.**
   ```php
-  $history = [
-      ...$history,
-      ...$response['output'],
-  ];
+  protected $signature = 'dialogue';
+  protected $description = 'Converse with OpenAI';
   ```
 
-- **Use a `while (true)` loop for continuous back-and-forth**
+- **Maintain a history array that tracks every message (user and AI) to preserve conversation context.**
+  ```php
+  $history = [];
+  $history[] = ['role' => 'user', 'content' => $prompt];
+  ```
+
+- **Send the full history array on every API call so the model can reference previous messages.**
+  ```php
+  $response = Http::withToken(config('services.openai.key'))
+      ->post('https://api.openai.com/v1/responses', [
+          'model' => 'gpt-5.4-nano',
+          'input' => $history,
+      ])
+      ->throw()
+      ->json();
+  ```
+
+- **Append the AI's response to history immediately after receiving it so the next prompt includes it.**
+  ```php
+  $history = [...$history, ...$response['output']];
+  ```
+
+- **Wrap the entire flow in `while (true)` to keep prompting, sending history, and collecting responses indefinitely.**
   ```php
   while (true) {
       $prompt = text(label: 'What is on your mind?', required: true);
-
-      $history[] = [
-          'role' => 'user',
-          'content' => $prompt,
-      ];
-
-      $response = spin(
-          callback: fn() => $this->runModel($history),
-          message: 'Thinking about that...'
-      );
-
-      $history = [
-          ...$history,
-          ...$response['output'],
-      ];
-
-      $this->info($response['output'][0]['content'][0]['text'] ?? 'No text response returned.');
+      $history[] = ['role' => 'user', 'content' => $prompt];
+      $response = spin(fn () => $this->runModel($history), 'Thinking...');
+      $history = [...$history, ...$response['output']];
+      $this->info($response['output'][0]['content'][0]['text']);
   }
   ```
 
-- **Without history, every prompt is a clean slate; with history, memory works**
+## Episode 03 — The Agent Loop
+
+- **Combine a loop with tools to give AI the ability to request capabilities it needs.**
   ```text
-  User: Hi there
-  AI: Hi! How can I help you today?
-  User: Call me Jeffrey
-  AI: Sure thing, Jeffrey.
-  User: What is my name?
-  AI: Your name is Jeffrey.
+  Outer loop: User prompt → Model response → User sees result
+  Inner loop: Model asks for tool → App runs tool → Model asks for more or responds
   ```
 
-- **The loop is necessary, but tools are what make it a true agent**
-  ```text
-  Episode 01: Single prompt -> single response
-  Episode 02: Loop + history -> ongoing dialog
-  Episode 03+: Add tool execution -> agent behavior
-  ```
-
----
-
-## Episode 03: The Agent Loop
-
-### Key Lessons & Practical Examples
-
-- **An agent needs two ingredients: a loop and tools**
-  ```text
-  Loop   -> lets the model think in steps
-  Tools  -> let the model gather real information
-
-  Example flow:
-  User asks a question
-  -> AI requests a tool
-  -> App runs the tool
-  -> AI receives the tool result
-  -> AI answers the user
-  ```
-
-- **Tools are callable functions that extend the AI with real capabilities**
+- **Declare tools in each API request so the model knows what functions it can request.**
   ```php
   'tools' => [
       [
           'type' => 'function',
           'name' => 'get_current_time',
-          'description' => 'Get the current server time as an ISO string.',
-          'parameters' => [
-              'type' => 'object',
-              'properties' => [],
-              'required' => [],
-          ],
+          'description' => 'Get current server time as ISO string.',
+          'parameters' => ['type' => 'object', 'properties' => [], 'required' => []],
       ],
-  ]
+  ],
   ```
 
-- **The Responses API is stateless, so available tools must be sent with every request**
-  ```php
-  private function runModel(array $history): array
-  {
-      return Http::withToken(config('services.openai.key'))
-          ->post('https://api.openai.com/v1/responses', [
-              'model' => 'gpt-5.4-nano',
-              'input' => $history,
-              'tools' => [
-                  [
-                      'type' => 'function',
-                      'name' => 'get_current_time',
-                      'description' => 'Get the current server time as an ISO string.',
-                      'parameters' => [
-                          'type' => 'object',
-                          'properties' => [],
-                          'required' => [],
-                      ],
-                  ],
-              ],
-          ])
-          ->throw()
-          ->json();
-  }
-  ```
-
-- **Once tools are enabled, the first output item may be a function call instead of text**
-  ```php
-  $call = $response['output'][0];
-
-  if ($call['type'] === 'function_call') {
-      // The model is asking the app to run a tool.
-      $toolName = $call['name'];
-  }
-  ```
-
-- **The app must execute the requested tool and append the tool result back into history**
-  ```php
-  if ($call['name'] === 'get_current_time') {
-      $history[] = [
-          'type' => 'function_call_output',
-          'call_id' => $call['call_id'],
-          'output' => now()->toIso8601String(),
-      ];
-  }
-  ```
-
-- **Use an inner loop for the agent's private reasoning and an outer loop for user dialogue**
-  ```php
-  while (true) {
-      $prompt = text(label: 'What is on your mind?', required: true);
-
-      $history[] = [
-          'role' => 'user',
-          'content' => $prompt,
-      ];
-
-      while (true) {
-          $response = spin(
-              callback: fn() => $this->runModel($history),
-              message: 'Thinking about that...'
-          );
-
-          $history = [
-              ...$history,
-              ...$response['output'],
-          ];
-
-          $functionCalls = collect($response['output'])
-              ->filter(fn(array $item): bool => $item['type'] === 'function_call');
-
-          if ($functionCalls->isEmpty()) {
-              $this->info($response['output'][0]['content'][0]['text'] ?? 'No text response returned.');
-              break;
-          }
-
-          foreach ($functionCalls as $call) {
-              if ($call['name'] === 'get_current_time') {
-                  $history[] = [
-                      'type' => 'function_call_output',
-                      'call_id' => $call['call_id'],
-                      'output' => now()->toIso8601String(),
-                  ];
-              }
-          }
-      }
-  }
-  ```
-
-- **A single model response can request multiple tools, so collect and process all function calls**
+- **Check if the first output item is a tool call instead of text by filtering the response.**
   ```php
   $functionCalls = collect($response['output'])
-      ->filter(fn(array $item): bool => $item['type'] === 'function_call');
-
-  foreach ($functionCalls as $call) {
-      // Run each requested tool before asking the model again.
-  }
+      ->filter(fn (array $item): bool => $item['type'] === 'function_call');
   ```
 
-- **Tools can accept structured arguments, like a file-reading tool**
-  ```php
-  [
-      'type' => 'function',
-      'name' => 'read_file',
-      'description' => 'Read a file from the project root.',
-      'parameters' => [
-          'type' => 'object',
-          'properties' => [
-              'path' => [
-                  'type' => 'string',
-                  'description' => 'The relative file path to read.',
-              ],
-          ],
-          'required' => ['path'],
-          'additionalProperties' => false,
-      ],
-      'strict' => true,
-  ]
-  ```
-
-- **Tool arguments arrive as JSON, so decode them before using them**
-  ```php
-  $arguments = json_decode($call['arguments']);
-
-  $contents = file_get_contents(
-      base_path($arguments->path)
-  );
-  ```
-
-- **`call_id` links each tool result to the exact function call that requested it**
+- **Return tool results to the model as `function_call_output` with the matching `call_id` so it knows which result belongs to which request.**
   ```php
   $history[] = [
       'type' => 'function_call_output',
       'call_id' => $call['call_id'],
-      'output' => $contents,
+      'output' => now()->toIso8601String(),
   ];
   ```
 
-- **Show which tool is running so the CLI feels alive while the agent works**
+- **Wrap the model call in an inner loop that runs until there are no more tool calls, then break when ready to provide text response.**
   ```php
-  info("Running tool: {$call['name']}(...) ");
-  ```
-
-- **A practical multi-tool example is reading both `package.json` and `composer.json` in one turn**
-  ```text
-  User: Read the contents of package.json and composer.json.
-
-  AI response #1:
-  - function_call: read_file({"path":"package.json"})
-  - function_call: read_file({"path":"composer.json"})
-
-  App:
-  - reads package.json
-  - reads composer.json
-  - appends both function_call_output items to history
-
-  AI response #2:
-  "Here is what each file contains..."
-  ```
-
-- **A minimal agent command combines history, tools, an outer dialogue loop, and an inner tool loop**
-  ```php
-  <?php
-
-  namespace App\Console\Commands;
-
-  use Illuminate\Console\Command;
-  use Illuminate\Support\Collection;
-  use Illuminate\Support\Facades\Http;
-  use function Laravel\Prompts\info;
-  use function Laravel\Prompts\spin;
-  use function Laravel\Prompts\text;
-
-  class AgentCommand extends Command
-  {
-      protected $signature = 'agent';
-      protected $description = 'Run a simple tool-using agent';
-
-      public function handle(): void
-      {
-          $history = [];
-
-          while (true) {
-              $prompt = text(label: 'What is on your mind?', required: true);
-
-              $history[] = [
-                  'role' => 'user',
-                  'content' => $prompt,
-              ];
-
-              while (true) {
-                  $response = spin(
-                      callback: fn() => $this->runModel($history),
-                      message: 'Thinking about that...'
-                  );
-
-                  $history = [
-                      ...$history,
-                      ...$response['output'],
-                  ];
-
-                  $functionCalls = collect($response['output'])
-                      ->filter(fn(array $item): bool => $item['type'] === 'function_call');
-
-                  if ($functionCalls->isEmpty()) {
-                      $this->info($response['output'][0]['content'][0]['text'] ?? 'No text response returned.');
-                      break;
-                  }
-
-                  $this->runTools($functionCalls, $history);
-              }
-          }
+  while (true) {
+      $response = spin(fn () => $this->runModel($history), 'Thinking...');
+      $functionCalls = collect($response['output'])
+          ->filter(fn (array $item): bool => $item['type'] === 'function_call');
+      
+      if ($functionCalls->isEmpty()) {
+          break;
       }
-
-      private function runModel(array $history): array
-      {
-          return Http::withToken(config('services.openai.key'))
-              ->post('https://api.openai.com/v1/responses', [
-                  'model' => 'gpt-5.4-nano',
-                  'input' => $history,
-                  'tools' => [
-                      [
-                          'type' => 'function',
-                          'name' => 'get_current_time',
-                          'description' => 'Get the current server time as an ISO string.',
-                          'parameters' => [
-                              'type' => 'object',
-                              'properties' => [],
-                              'required' => [],
-                          ],
-                      ],
-                      [
-                          'type' => 'function',
-                          'name' => 'read_file',
-                          'description' => 'Read a file from the project root.',
-                          'parameters' => [
-                              'type' => 'object',
-                              'properties' => [
-                                  'path' => [
-                                      'type' => 'string',
-                                      'description' => 'The relative file path to read.',
-                                  ],
-                              ],
-                              'required' => ['path'],
-                              'additionalProperties' => false,
-                          ],
-                          'strict' => true,
-                      ],
-                  ],
-              ])
-              ->throw()
-              ->json();
-      }
-
-      private function runTools(Collection $functionCalls, array &$history): void
-      {
-          foreach ($functionCalls as $call) {
-              info("Running tool: {$call['name']}(...) ");
-
-              if ($call['name'] === 'get_current_time') {
-                  $history[] = [
-                      'type' => 'function_call_output',
-                      'call_id' => $call['call_id'],
-                      'output' => now()->toIso8601String(),
-                  ];
-              }
-
-              if ($call['name'] === 'read_file') {
-                  $arguments = json_decode($call['arguments']);
-
-                  $history[] = [
-                      'type' => 'function_call_output',
-                      'call_id' => $call['call_id'],
-                      'output' => file_get_contents(base_path($arguments->path)),
-                  ];
-              }
-          }
+      
+      foreach ($functionCalls as $call) {
+          $output = $this->runTool($call['name'], $call['arguments']);
+          $history[] = [
+              'type' => 'function_call_output',
+              'call_id' => $call['call_id'],
+              'output' => (string) $output,
+          ];
       }
   }
   ```
 
----
-
-## Episode 04: Extract A Tool Class
-
-### Key Lessons & Practical Examples
-
-- **Inline `if/elseif` tool conditionals do not scale; extract each tool into its own class**
+- **Loop over all function calls to run each tool, since the model can request multiple tools in a single response.**
   ```php
-  // Before: each new tool adds another conditional branch in AgentCommand
-  if ($call['name'] === 'get_current_time') {
-      // ...
-  }
-
-  if ($call['name'] === 'read_file') {
-      // ...
-  }
-
-  // After: create one class per tool and register it
-  private function tools(): array
-  {
-      return [
-          new CurrentTime(),
-          new ReadFile(),
-      ];
+  foreach ($functionCalls as $call) {
+      match ($call['name']) {
+          'get_current_time' => $history[] = [
+              'type' => 'function_call_output',
+              'call_id' => $call['call_id'],
+              'output' => now()->toIso8601String(),
+          ],
+          'read_file' => $history[] = [
+              'type' => 'function_call_output',
+              'call_id' => $call['call_id'],
+              'output' => file_get_contents(base_path(json_decode($call['arguments'], true)['path'])),
+          ],
+      };
   }
   ```
 
-- **Create a dedicated tools directory to group all AI tool behavior in one place**
-  ```text
-  app/
-    AI/
-      Tools/
-        Tool.php
-        CurrentTime.php
-        ReadFile.php
+## Episode 04 — Extract A Tool Class
+
+- **Create separate tool classes instead of inline conditionals to keep agent code clean and follow SOLID principles.**
+  ```php
+  // app/AI/Tools/CurrentTime.php
+  // app/AI/Tools/ReadFile.php
   ```
 
-- **Define a `Tool` interface so all tools share a common contract**
+- **Use a `Tool` interface so every tool implements the same contract with `definition()` and `use()` methods.**
   ```php
-  <?php
-
-  namespace App\AI\Tools;
-
   interface Tool
   {
       public function definition(): array;
-
       public function use(array $arguments = []): mixed;
   }
   ```
 
-- **Move OpenAI function schema into each tool via `definition()`**
+- **Keep API schema in `definition()` so the model knows what the tool is and what arguments it accepts.**
   ```php
-  // app/AI/Tools/CurrentTime.php
-  public function definition(): array
-  {
-      return [
-          'type' => 'function',
-          'name' => 'get_current_time',
-          'description' => 'Get the current server time as an ISO string.',
-          'parameters' => [
-              'type' => 'object',
-              'properties' => [],
-              'required' => [],
-          ],
-      ];
-  }
-  ```
-
-- **Put the execution logic in `use()` so each tool handles itself**
-  ```php
-  // app/AI/Tools/CurrentTime.php
-  public function use(array $arguments = []): string
-  {
-      return now()->toIso8601String();
-  }
-  ```
-
-- **For argument-driven tools, decode AI arguments before calling `use()`**
-  ```php
-  $decodedArguments = json_decode($call['arguments'], true) ?? [];
-
-  $output = $tool->use($decodedArguments);
-  ```
-
-- **Example: a `ReadFile` tool defines its schema and reads from `base_path()`**
-  ```php
-  <?php
-
-  namespace App\AI\Tools;
-
-  class ReadFile implements Tool
+  class CurrentTime implements Tool
   {
       public function definition(): array
       {
           return [
               'type' => 'function',
-              'name' => 'read_file',
-              'description' => 'Read a file by relative path.',
-              'parameters' => [
-                  'type' => 'object',
-                  'properties' => [
-                      'path' => [
-                          'type' => 'string',
-                          'description' => 'Relative file path from the project root.',
-                      ],
-                  ],
-                  'required' => ['path'],
-                  'additionalProperties' => false,
-              ],
-              'strict' => true,
+              'name' => 'get_current_time',
+              'description' => 'Get current server time as ISO string.',
+              'parameters' => ['type' => 'object', 'properties' => [], 'required' => []],
           ];
       }
 
       public function use(array $arguments = []): string
       {
-          return file_get_contents(base_path($arguments['path']));
+          return now()->toIso8601String();
       }
   }
   ```
 
-- **Send tool definitions to the model, not tool objects**
+- **Extract a `tools()` method that returns an array of tool instances so you can loop through them instead of using conditionals.**
   ```php
-  'tools' => collect($this->tools())
-      ->map(fn(Tool $tool): array => $tool->definition())
-      ->values()
-      ->all(),
+  private function tools(): array
+  {
+      return [new CurrentTime(), new ReadFile()];
+  }
   ```
 
-- **Resolve and execute tools by matching call name to the tool definition name**
+- **Map tool definitions from instances before sending to the API so it receives only the schema, not PHP objects.**
   ```php
-  foreach ($functionCalls as $call) {
-      foreach ($this->tools() as $tool) {
-          if ($tool->definition()['name'] !== $call['name']) {
-              continue;
-          }
+  $toolDefinitions = collect($this->tools())
+      ->map(fn (Tool $tool): array => $tool->definition())
+      ->values()
+      ->all();
+  
+  // Send $toolDefinitions in API request
+  ```
 
-          $output = $tool->use(json_decode($call['arguments'], true) ?? []);
-
+- **Loop through tools to find the matching name and call its `use()` method with decoded arguments.**
+  ```php
+  foreach ($this->tools() as $tool) {
+      if ($tool->definition()['name'] === $call['name']) {
+          $output = $tool->use(json_decode($call['arguments'], true));
           $history[] = [
               'type' => 'function_call_output',
               'call_id' => $call['call_id'],
-              'output' => $output,
+              'output' => (string) $output,
           ];
+          break;
       }
   }
   ```
 
-- **This refactor follows open/closed design: add a tool class + register it, no core branch edits**
-  ```text
-  Add new capability checklist:
-  1) Create class in app/AI/Tools implementing Tool
-  2) Add definition() + use()
-  3) Register it in tools()
-  4) Done (no new conditional chain)
-  ```
+## Episode 05 — Make a Revenue Tool
 
-- **End-to-end practical example: one prompt can trigger two registered tools (`read_file` twice) and then answer**
-  ```text
-  User: Read package.json and composer.json.
-  Agent internal loop:
-  - model asks for read_file(package.json)
-  - model asks for read_file(composer.json)
-  - app runs both via Tool classes
-  - app appends both function_call_output entries
-  - model returns final human-readable summary
-  ```
-
----
-
-## Episode 05: Make a Revenue Tool
-
-### Key Lessons & Practical Examples
-
-- **Add focused business tools when the model needs app-specific data (like revenue)**
+- **Create domain-specific tools to give the AI access to business data it otherwise couldn't query.**
   ```php
-  // app/Console/Commands/AgentCommand.php
-  private function tools(): array
+  class Revenue implements Tool
   {
-      return [
-          new CurrentTime(),
-          new ReadFile(),
-          new Revenue(),
-      ];
+      public function definition(): array
+      {
+          return [
+              'type' => 'function',
+              'name' => 'site_revenue',
+              'description' => 'Get site revenue for a specific period.',
+              'parameters' => [...],
+          ];
+      }
+
+      public function use(array $arguments = []): string { ... }
   }
   ```
 
-- **Use JSON Schema parameters so the model can request revenue by period**
+- **Define tool parameters with JSON schema enum so the AI chooses from valid options (daily, monthly, quarterly, yearly).**
   ```php
-  // app/AI/Tools/Revenue.php
-  public function definition(): array
-  {
-      return [
-          'type' => 'function',
-          'name' => 'site_revenue',
-          'description' => 'Get site revenue for a period.',
-          'parameters' => [
-              'type' => 'object',
-              'properties' => [
-                  'period' => [
-                      'type' => 'string',
-                      'description' => 'Revenue period to fetch.',
-                      'enum' => ['daily', 'monthly', 'quarterly', 'yearly'],
-                  ],
-              ],
-              'required' => ['period'],
-              'additionalProperties' => false,
+  'parameters' => [
+      'type' => 'object',
+      'properties' => [
+          'period' => [
+              'type' => 'string',
+              'enum' => ['daily', 'monthly', 'quarterly', 'yearly'],
+              'description' => 'The period of time to fetch revenue for.',
           ],
-          'strict' => true,
-      ];
-  }
+      ],
+      'required' => ['period'],
+      'additionalProperties' => false,
+  ],
   ```
 
-- **Stub tool output first to validate the agent loop before wiring a real query**
+- **Enable `strict` mode in your tool definition to enforce structured output and prevent invalid parameter values.**
   ```php
-  // app/AI/Tools/Revenue.php
+  'parameters' => [
+      'type' => 'object',
+      'properties' => ['period' => ['type' => 'string', 'enum' => [...]]],
+      'required' => ['period'],
+      'additionalProperties' => false,
+      'strict' => true,
+  ],
+  ```
+
+- **Stub tool responses with hardcoded match statements before writing database queries so you can test the agent loop.**
+  ```php
   public function use(array $arguments = []): string
   {
       return match ($arguments['period'] ?? null) {
@@ -807,198 +300,194 @@ This course teaches you how to build AI agents step-by-step, starting with the f
           'monthly' => '18000',
           'quarterly' => '120000',
           'yearly' => '850000',
-          default => 'unknown period',
+          default => '0',
       };
   }
   ```
 
-- **Keep `strict: true` + `enum` to reduce invalid arguments from the model**
-  ```text
-  With strict mode:
-  - model must send the declared shape
-  - period is required
-  - period should be one of: daily/monthly/quarterly/yearly
-  ```
-
-- **Always append tool output as a string in `function_call_output`**
+- **Always cast tool output to string when appending `function_call_output` to prevent type errors in the API request.**
   ```php
   $history[] = [
       'type' => 'function_call_output',
       'call_id' => $call['call_id'],
-      'output' => (string) $output,
+      'output' => (string) $tool->use(json_decode($call['arguments'], true)),
   ];
   ```
 
-- **Practical flow: quarter question -> revenue tool -> final answer**
-  ```text
-  User: How much did we earn last quarter in revenue?
-  Agent internal step: site_revenue({"period":"quarterly"})
-  Tool output: "120000"
-  Final response: We earned $120,000 last quarter.
-  ```
+## Episode 06 — Structured Output
 
-- **Follow-up prompts reuse the same tool with a different period**
-  ```text
-  User: What about last week?
-  Agent chooses period: daily
-  Tool output: "900"
-  Final response: Last week's revenue was $900.
-  ```
-
----
-
-## Episode 06: Structured Output
-
-### Key Lessons & Practical Examples
-
-- **Different agents can require different response shapes, so structured output belongs at the agent level**
+- **Define a JSON schema in the API request to enforce a specific output structure when you need deterministic, parseable responses.**
   ```php
-  // Chatbot agent: one simple response string
-  'schema' => [
-      'type' => 'object',
-      'properties' => [
-          'response' => [
-              'type' => 'string',
+  'text' => [
+      'format' => [
+          'type' => 'json_schema',
+          'name' => 'agent_response',
+          'schema' => [
+              'type' => 'object',
+              'properties' => ['response' => ['type' => 'string']],
+              'required' => ['response'],
+              'additionalProperties' => false,
           ],
       ],
-      'required' => ['response'],
-      'additionalProperties' => false,
   ],
   ```
 
-- **Send structured output in the request with strict mode so the model must obey the schema**
+- **Enable `strict: true` in the schema to guarantee the AI's response matches your structure exactly, preventing hallucinations and format violations.**
   ```php
-  return Http::withToken(config('services.openai.key'))
-      ->post('https://api.openai.com/v1/responses', [
-          'model' => 'gpt-5.4-nano',
-          'input' => $this->history,
-          'tools' => collect($this->tools())
-              ->map(fn(Tool $tool): array => $tool->definition())
-              ->values()
-              ->all(),
-          'text' => [
-              'format' => [
-                  'type' => 'json_schema',
-                  'name' => 'agent_response',
-                  'strict' => true,
-                  'schema' => $this->schema(),
-              ],
-          ],
-      ])
-      ->throw()
-      ->json();
+  'schema' => [
+      'type' => 'object',
+      'properties' => ['nouns' => [...], 'adjectives' => [...], 'verbs' => [...]],
+      'required' => ['nouns', 'adjectives', 'verbs'],
+      'additionalProperties' => false,
+      'strict' => true,
+  ],
   ```
 
-- **Refactor tool execution into a reusable method so the command stays small**
-  ```php
-  private function runTool(array $call): void
-  {
-      foreach ($this->tools() as $tool) {
-          if ($tool->definition()['name'] !== $call['name']) {
-              continue;
-          }
-
-          $this->history[] = [
-              'type' => 'function_call_output',
-              'call_id' => $call['call_id'],
-              'output' => (string) $tool->use(json_decode($call['arguments'], true) ?? []),
-          ];
-      }
-  }
-  ```
-
-- **A base `Agent` class can own history, tools, schema, instructions, and the model request**
+- **Extract agent logic into an abstract `Agent` base class so each agent can define its own instructions, tools, and schema.**
   ```php
   abstract class Agent
   {
       public array $history = [];
-
-      public function prompt(string $prompt): mixed
+      
+      protected function instructions(): string
       {
-          $this->history[] = [
-              'role' => 'user',
-              'content' => $prompt,
-          ];
-
-          return $this->run();
+          return 'You are a helpful assistant.';
       }
-
-      abstract protected function schema(): ?array;
-      abstract protected function tools(): array;
+      
+      protected function tools(): array
+      {
+          return [];
+      }
+      
+      protected function schema(): ?array
+      {
+          return null;
+      }
   }
   ```
 
-- **Create a dedicated chatbot agent for conversational output and a separate grammar agent for extracted data**
+- **Create specialized agent subclasses (ChatbotAgent, GrammarAgent) so different parts of your app can use agents designed for specific purposes.**
   ```php
-  // app/AI/Agents/ChatbotAgent.php
-  protected function schema(): ?array
+  class ChatbotAgent extends Agent
   {
-      return [
-          'type' => 'object',
-          'properties' => [
-              'response' => ['type' => 'string'],
-          ],
-          'required' => ['response'],
-          'additionalProperties' => false,
-      ];
+      protected function instructions(): string
+      {
+          return 'You are a sarcastic but helpful coding assistant.';
+      }
+      
+      protected function tools(): array
+      {
+          return [new CurrentTime(), new ReadFile()];
+      }
   }
-
-  // app/AI/Agents/GrammarAssistantAgent.php
-  protected function schema(): ?array
+  
+  class GrammarAgent extends Agent
   {
-      return [
-          'type' => 'object',
-          'properties' => [
-              'nouns' => [
-                  'type' => 'array',
-                  'items' => ['type' => 'string'],
+      protected function schema(): ?array
+      {
+          return [
+              'type' => 'object',
+              'properties' => [
+                  'nouns' => ['type' => 'array', 'items' => ['type' => 'string']],
+                  'adjectives' => ['type' => 'array', 'items' => ['type' => 'string']],
+                  'verbs' => ['type' => 'array', 'items' => ['type' => 'string']],
               ],
-              'adjectives' => [
-                  'type' => 'array',
-                  'items' => ['type' => 'string'],
-              ],
-              'verbs' => [
-                  'type' => 'array',
-                  'items' => ['type' => 'string'],
-              ],
-          ],
-          'required' => ['nouns', 'adjectives', 'verbs'],
-          'additionalProperties' => false,
-      ];
+              'required' => ['nouns', 'adjectives', 'verbs'],
+              'additionalProperties' => false,
+              'strict' => true,
+          ];
+      }
   }
   ```
 
-- **Use the agent from a command by instantiating the right class, then passing the prompt into it**
+- **Parse structured responses as PHP arrays to interact with AI output programmatically in your codebase.**
   ```php
-  // app/Console/Commands/AgentCommand.php
-  $agent = new GrammarAssistantAgent();
-  $response = $agent->prompt($sentence);
-
-  $this->info(json_encode($response));
-  ```
-
-- **Structured output makes the response programmatic instead of free-form text**
-  ```text
-  Chatbot agent:
-  { "response": "Hello!" }
-
-  Grammar agent:
-  {
-    "nouns": ["dog", "house", "car"],
-    "adjectives": ["big", "brown", "green"],
-    "verbs": ["jumps", "landed"]
-  }
-  ```
-
-- **The main payoff is determinism: your app can trust the shape and use it directly**
-  ```php
+  $response = $agent->prompt('The brown dog jumped over a fence.');
   $data = json_decode($response, true);
-
+  
   foreach ($data['nouns'] as $noun) {
-      // store or display nouns reliably
+      // Use extracted data in your app
   }
   ```
 
+## Episode 07 — Filesystem Tools
 
+- **Give the agent core coding abilities (run scripts, read/write files, list directories, glob paths, search content) so it can do meaningful project work.**
+  ```text
+  Tools to add: read_file, write_file, run_bash_script, list_files, glob_files, search_in_files
+  ```
 
+- **Wrap common capabilities in dedicated tools instead of relying only on generic shell commands to keep behavior deterministic and easier to trace.**
+  ```php
+  interface Tool
+  {
+      public function definition(): array;
+      public function use(array $arguments = []): mixed;
+  }
+  ```
 
+- **Use each tool filename as the contract for what it should do, then implement all tool classes to match that responsibility.**
+  ```php
+  // app/AI/Tools/ReadFile.php
+  // app/AI/Tools/WriteFile.php
+  // app/AI/Tools/RunBashScript.php
+  // app/AI/Tools/ListFiles.php
+  // app/AI/Tools/GlobFiles.php
+  // app/AI/Tools/SearchInFiles.php
+  ```
+
+- **Validate inputs and return clear errors in filesystem tools so the agent can recover from bad paths safely.**
+  ```php
+  $path = base_path($arguments['path'] ?? '');
+
+  if (! file_exists($path)) {
+      return 'Error: File does not exist.';
+  }
+
+  return file_get_contents($path);
+  ```
+
+- **Run shell commands through a process tool and return either stdout or stderr so the agent can inspect test/build results.**
+  ```php
+  $process = Process::run($arguments['command'] ?? '');
+
+  if (! $process->successful()) {
+      return $process->errorOutput();
+  }
+
+  return $process->output();
+  ```
+
+- **Register all new tools in your chatbot agent so tool calls can be selected during the inner agent loop.**
+  ```php
+  protected function tools(): array
+  {
+      return [
+          new ReadFile(),
+          new WriteFile(),
+          new RunBashScript(),
+          new ListFiles(),
+          new GlobFiles(),
+          new SearchInFiles(),
+      ];
+  }
+  ```
+
+- **Use the command loop to repeatedly prompt the agent and verify real edits, like creating files or adding routes, are done through tool calls.**
+  ```php
+  while (true) {
+      $prompt = text(label: 'What is on your mind?', required: true);
+      $this->line($agent->prompt($prompt));
+  }
+  ```
+
+- **Log tool call names during development when you need observability into what the agent is doing behind the scenes.**
+  ```php
+  $this->line("Running tool call: {$call['name']}");
+  ```
+
+- **The main pattern remains a loop within a loop: the model decides, tools execute, results feed back, then the agent responds.**
+  ```text
+  Outer loop: user prompt -> final assistant response
+  Inner loop: assistant tool call -> tool result -> assistant next action
+  ```

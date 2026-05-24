@@ -6,11 +6,12 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
+
 use function Laravel\Prompts\spin;
 use function Laravel\Prompts\text;
 
 #[Signature('chat')]
-#[Description('Chat with Claude')]
+#[Description('Chat with OpenAI')]
 class ChatCommand extends Command
 {
     /**
@@ -25,7 +26,7 @@ class ChatCommand extends Command
         );
 
         $response = spin(
-            callback: fn () => $this->callClaude($prompt),
+            callback: fn () => $this->runModel($prompt),
             message: 'Thinking about that...'
         );
 
@@ -35,27 +36,24 @@ class ChatCommand extends Command
     }
 
     /**
-     * Call Claude API via Anthropic.
+     * Call the OpenAI Responses API.
      */
-    private function callClaude(string $prompt): string
+    private function runModel(string $prompt): string
     {
-        try {
-            $response = Http::withHeader('x-api-key', config('services.anthropic.key'))
-                ->withHeader('anthropic-version', '2023-06-01')
-                ->post('https://api.anthropic.com/v1/messages', [
-                    'model' => 'claude-3-5-haiku-20241022',
-                    'max_tokens' => 1024,
-                    'system' => 'You are a helpful assistant.',
-                    'messages' => [
-                        ['role' => 'user', 'content' => $prompt],
+        $response = Http::withToken(config('services.openai.key'))
+            ->post('https://api.openai.com/v1/responses', [
+                'model' => config('services.openai.model', 'gpt-5.4-nano'),
+                'instructions' => 'You are a helpful assistant.',
+                'input' => [
+                    [
+                        'role' => 'user',
+                        'content' => $prompt,
                     ],
-                ])
-                ->throw()
-                ->json();
+                ],
+            ])
+            ->throw()
+            ->json();
 
-            return $response['content'][0]['text'];
-        } catch (\Exception $e) {
-            throw new \RuntimeException("Failed to call Claude API: {$e->getMessage()}");
-        }
+        return (string) ($response['output'][0]['content'][0]['text'] ?? 'No text response returned.');
     }
 }
