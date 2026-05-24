@@ -3,6 +3,7 @@
 namespace App\AI\Agents;
 
 use App\AI\Agent;
+use App\AI\Attributes\CompactsAfter;
 use App\AI\Tools\CurrentTime;
 use App\AI\Tools\GlobFiles;
 use App\AI\Tools\ListFiles;
@@ -13,6 +14,7 @@ use App\AI\Tools\SearchInFiles;
 use App\AI\Tools\Tool;
 use App\AI\Tools\WriteFile;
 
+#[CompactsAfter(30)]
 class ChatbotAgent extends Agent
 {
     /**

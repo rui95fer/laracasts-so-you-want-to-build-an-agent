@@ -487,7 +487,90 @@
   ```
 
 - **The main pattern remains a loop within a loop: the model decides, tools execute, results feed back, then the agent responds.**
-  ```text
-  Outer loop: user prompt -> final assistant response
-  Inner loop: assistant tool call -> tool result -> assistant next action
-  ```
+   ```text
+   Outer loop: user prompt -> final assistant response
+   Inner loop: assistant tool call -> tool result -> assistant next action
+   ```
+
+## Episode 08 — Compacting
+
+- **Long conversations blow out context tokens as history array grows indefinitely, so you need compaction to summarize old messages.**
+   ```text
+   Without compaction: user message → tool result → assistant response → user message...
+   After 20-30 exchanges, history array becomes too large for API token limits.
+   ```
+
+- **Base compaction on message count (simplest) rather than token usage for rapid implementation, though tokens would be more accurate.**
+   ```php
+   // Simple: Compact when history count reaches threshold
+   // Advanced: Compact when token usage exceeds a limit
+   // We'll use message count for this example.
+   ```
+
+- **Use a PHP attribute at class level to declare compaction thresholds, keeping configuration as metadata near the class definition.**
+   ```php
+   #[CompactsAfter(3)]
+   class ChatbotAgent extends Agent
+   {
+       // This agent compacts its history when it reaches 3 messages
+   }
+   ```
+
+- **Create a PHP attribute class with a threshold property and target the class level using `Attribute` constraint.**
+   ```php
+   #[Attribute(Attribute::TARGET_CLASS)]
+   class CompactsAfter
+   {
+       public function __construct(public int $threshold) {}
+   }
+   ```
+
+- **Read attributes using Reflection API to extract compaction configuration from the agent class at runtime.**
+   ```php
+   $reflection = new ReflectionClass($this);
+   $attributes = $reflection->getAttributes(CompactsAfter::class);
+   $config = $attributes[0]?->newInstance();
+   $threshold = $config?->threshold ?? 30; // Default if not specified
+   ```
+
+- **Check if history exceeds the threshold before prompting, and if so, call a compaction method that summarizes old messages.**
+   ```php
+   private function maybeCompact(): void
+   {
+       if (count($this->history) >= $this->getThreshold()) {
+           $this->compact();
+       }
+   }
+   ```
+
+- **Summarize old conversation history by sending all messages to the AI with instructions to preserve key facts and decisions.**
+   ```php
+   $response = Http::withToken(config('services.openai.key'))
+       ->post('https://api.openai.com/v1/responses', [
+           'model' => 'gpt-5.4-nano',
+           'instructions' => 'Summarize the following conversation history concisely, preserve the key facts and decisions, tool results, unresolved questions, omit pleasantries and redundant exchanges.',
+           'input' => $this->history,
+       ])
+       ->throw()
+       ->json();
+   ```
+
+- **Replace history with the summary wrapped in a user message to maintain conversation context, prefixing with "Earlier conversation summary:" for clarity.**
+   ```php
+   $summary = $response['output'][0]['content'][0]['text'];
+   $this->history = [
+       ['role' => 'user', 'content' => "Earlier conversation summary:\n{$summary}"],
+   ];
+   ```
+
+- **Run compaction before each prompt so you reset history only when needed, then continue the agent loop with the summarized context.**
+   ```php
+   public function prompt(string $input): string
+   {
+       $this->maybeCompact(); // Reset history if threshold exceeded
+       $this->history[] = ['role' => 'user', 'content' => $input];
+       // ... run model, handle tools, return response
+   }
+   ```
+
+

@@ -2,9 +2,11 @@
 
 namespace App\AI;
 
+use App\AI\Attributes\CompactsAfter;
 use App\AI\Tools\Tool;
 use Illuminate\Support\Facades\Http;
 use JsonException;
+use ReflectionClass;
 
 use function Laravel\Prompts\spin;
 
@@ -30,14 +32,68 @@ abstract class Agent
         return null;
     }
 
+    protected function getThreshold(): int
+    {
+        $reflection = new ReflectionClass($this);
+        $attributes = $reflection->getAttributes(CompactsAfter::class);
+
+        if (! empty($attributes)) {
+            $attribute = $attributes[0]->newInstance();
+
+            return $attribute->threshold;
+        }
+
+        return 30; // Default threshold
+    }
+
+    protected function shouldCompact(): bool
+    {
+        return count($this->history) >= $this->getThreshold();
+    }
+
+    protected function compact(): void
+    {
+        $response = spin(
+            callback: fn () => Http::withToken(config('services.openai.key'))
+                ->connectTimeout(10)
+                ->timeout(30)
+                ->post('https://api.openai.com/v1/responses', [
+                    'model' => config('services.openai.model', 'gpt-5.4-nano'),
+                    'instructions' => 'Summarize the following conversation history concisely, preserve the key facts and decisions, tool results, unresolved questions, omit pleasantries and redundant exchanges.',
+                    'input' => $this->history,
+                ])
+                ->throw()
+                ->json(),
+            message: 'Compacting conversation history...',
+        );
+
+        $summary = $this->extractText($response['output'] ?? []);
+
+        $this->history = [
+            [
+                'role' => 'user',
+                'content' => "Earlier conversation summary:\n{$summary}",
+            ],
+        ];
+    }
+
     public function prompt(string $prompt): mixed
     {
+        $this->maybeCompact();
+
         $this->history[] = [
             'role' => 'user',
             'content' => $prompt,
         ];
 
         return $this->run();
+    }
+
+    protected function maybeCompact(): void
+    {
+        if ($this->shouldCompact()) {
+            $this->compact();
+        }
     }
 
     protected function run(): mixed

@@ -1,5 +1,6 @@
 <?php
 
+use App\AI\Agent;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -358,4 +359,107 @@ test('it exits immediately without calling the model', function () {
         ->assertSuccessful();
 
     Http::assertNothingSent();
+});
+
+test('it compacts conversation history when reaching the threshold', function () {
+    // Create a test agent with a low threshold to trigger compaction
+    $agentClass = new class extends Agent
+    {
+        protected function tools(): array
+        {
+            return [];
+        }
+
+        protected function schema(): ?array
+        {
+            return null;
+        }
+
+        protected function getThreshold(): int
+        {
+            return 4; // Low threshold for testing
+        }
+    };
+
+    // Simulate a conversation that exceeds the threshold
+    $agent = new $agentClass;
+
+    Http::fakeSequence()
+        // First prompt - agent responds (history: user1, message1 = 2 items)
+        ->push([
+            'output' => [
+                [
+                    'type' => 'message',
+                    'content' => [
+                        ['type' => 'output_text', 'text' => 'Hi there!'],
+                    ],
+                ],
+            ],
+        ])
+        // Second prompt - agent responds (input: user1, message1, user2 = 3 items; after response: 4 items)
+        ->push([
+            'output' => [
+                [
+                    'type' => 'message',
+                    'content' => [
+                        ['type' => 'output_text', 'text' => 'Great question!'],
+                    ],
+                ],
+            ],
+        ])
+        // Third prompt triggers compaction because count(history) = 4 >= threshold(4)
+        // Compaction request - summarize history
+        ->push([
+            'output' => [
+                [
+                    'type' => 'message',
+                    'content' => [
+                        ['type' => 'output_text', 'text' => 'Summary: User greeted, agent greeted back. User asked question, agent answered.'],
+                    ],
+                ],
+            ],
+        ])
+        // After compaction - third prompt proceeds (history: summary, user3)
+        ->push([
+            'output' => [
+                [
+                    'type' => 'message',
+                    'content' => [
+                        ['type' => 'output_text', 'text' => 'Final answer!'],
+                    ],
+                ],
+            ],
+        ]);
+
+    $agent->prompt('Hello');
+    expect($agent->history)->toHaveCount(2); // user message + agent response
+
+    $agent->prompt('How are you?');
+    expect($agent->history)->toHaveCount(4); // Now we have 4 items (user1, msg1, user2, msg2)
+
+    // This third prompt should trigger compaction because history count = 4 >= threshold
+    $agent->prompt('Tell me more');
+
+    $requests = Http::recorded();
+
+    // First request - only first user message
+    expect($requests[0][0]['input'])->toBe([
+        ['role' => 'user', 'content' => 'Hello'],
+    ]);
+
+    // Second request - has 3 items (user1, message1, user2)
+    // The message2 is added AFTER the HTTP request is sent
+    expect($requests[1][0]['input'])->toHaveCount(3);
+    expect($requests[1][0]['input'][0]['content'])->toBe('Hello');
+    expect($requests[1][0]['input'][2]['content'])->toBe('How are you?');
+
+    // Third request - is the compaction call, sent with history count = 4
+    expect($requests[2][0]['instructions'])->toContain('Summarize the following conversation history');
+    expect($requests[2][0]['input'])->toHaveCount(4);
+
+    // Fourth request - user prompt after compaction, should have summary + new prompt
+    expect($requests[3][0]['input'])->toHaveCount(2);
+    expect($requests[3][0]['input'][0]['role'])->toBe('user');
+    expect($requests[3][0]['input'][0]['content'])->toContain('Earlier conversation summary');
+    expect($requests[3][0]['input'][1]['content'])->toBe('Tell me more');
 });
