@@ -6,6 +6,7 @@ use App\AI\Attributes\CompactsAfter;
 use App\AI\Tools\CurrentTime;
 use App\AI\Tools\GlobFiles;
 use App\AI\Tools\ListFiles;
+use App\AI\Tools\Memory;
 use App\AI\Tools\ReadFile;
 use App\AI\Tools\Revenue;
 use App\AI\Tools\RunBashScript;
@@ -30,6 +31,7 @@ class ChatbotAgent extends Agent
             new ListFiles,
             new GlobFiles,
             new SearchInFiles,
+            new Memory,
         ];
     }
 

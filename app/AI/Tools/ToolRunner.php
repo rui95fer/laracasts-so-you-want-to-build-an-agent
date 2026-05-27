@@ -1,8 +1,7 @@
 <?php
 
-namespace App\AI;
+namespace App\AI\Tools;
 
-use App\AI\Tools\Tool;
 use Illuminate\Support\Collection;
 use JsonException;
 

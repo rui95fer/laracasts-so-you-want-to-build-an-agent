@@ -56,6 +56,7 @@ test('it returns the assistant response when no tools are requested', function (
             'list_files',
             'glob_files',
             'search_in_files',
+            'remember',
         ]);
 
     expect($firstRequest['text']['format']['type'])->toBe('json_schema');

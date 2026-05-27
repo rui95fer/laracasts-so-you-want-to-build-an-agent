@@ -624,14 +624,102 @@
   ```
 
 - **Test that instructions load the guidelines file when it exists and work without it when deleted.**
-  ```php
-  test('loads guidelines when file exists', function () {
-      $agent = new ChatbotAgent();
-      file_put_contents(base_path('larry.md'), 'Use Pest.');
-      
-      expect($agent->instructions())->toContain('Use Pest.');
-      
-      unlink(base_path('larry.md'));
-  });
-  ```
+   ```php
+   test('loads guidelines when file exists', function () {
+       $agent = new ChatbotAgent();
+       file_put_contents(base_path('larry.md'), 'Use Pest.');
+       
+       expect($agent->instructions())->toContain('Use Pest.');
+       
+       unlink(base_path('larry.md'));
+   });
+   ```
+
+## Episode 10 — Agent Memory
+
+- **Implement memory as a tool so the agent can decide when to save facts that should persist across sessions.**
+   ```php
+   // app/AI/Tools/Memory.php
+   class Memory implements Tool
+   {
+       public function definition(): array
+       {
+           return [
+               'type' => 'function',
+               'name' => 'remember',
+               'description' => 'Save a stable long-term fact about the user or their project...',
+               'parameters' => [...],
+               'strict' => true,
+           ];
+       }
+   }
+   ```
+
+- **Write tool descriptions that guide the AI on when to use the tool and when not to, including examples of valid and invalid uses.**
+   ```php
+   'description' => 'Save a stable long term fact about the user or their project. Use this tool only for information that will remain useful across future sessions. Do not use for trivial details or already remembered facts.'
+   ```
+
+- **Extract storage logic to a dedicated Store class so the memory tool stays clean and storage can be swapped later.**
+   ```php
+   // app/AI/Memory/Store.php
+   class Store
+   {
+       public function fetch(): string { ... }
+       public function update(string $memory): void { ... }
+   }
+   ```
+
+- **Inject the Store into the Memory tool via constructor promotion, allowing a default instance while supporting custom implementations.**
+   ```php
+   class Memory implements Tool
+   {
+       public function __construct(protected Store $store = new Store()) {}
+   }
+   ```
+
+- **Use AI to merge new facts with existing memory instead of string matching, letting the model handle deduplication and contradiction resolution.**
+   ```php
+   $response = Http::withToken(config('services.openai.key'))
+       ->post('https://api.openai.com/v1/responses', [
+           'model' => 'gpt-5.4-nano',
+           'instructions' => 'You maintain a small markdown document of long-term facts...',
+           'input' => [
+               ['role' => 'user', 'content' => "Existing memory:\n{$memory}\n\nNew fact:\n{$fact}"],
+           ],
+       ])
+       ->throw()
+       ->json();
+   ```
+
+- **Return different messages based on whether the memory changed so the agent knows if the fact was new or already known.**
+   ```php
+   if ($refreshedMemory === $existingMemory) {
+       return 'Fact already known.';
+   }
+   
+   $this->store->update($refreshedMemory);
+   
+   return "Remembered: {$fact}";
+   ```
+
+- **Use file locking when writing to the memory store to prevent race conditions from concurrent updates.**
+   ```php
+   public function update(string $memory): void
+   {
+       file_put_contents($this->path(), $memory, LOCK_EX);
+   }
+   ```
+
+- **Add the memory tool to your agent's tools array so it becomes available during conversations.**
+   ```php
+   protected function tools(): array
+   {
+       return [
+           new ReadFile(),
+           new WriteFile(),
+           new Memory(),
+       ];
+   }
+   ```
 

@@ -3,8 +3,8 @@
 namespace App\AI\Agents;
 
 use App\AI\Attributes\CompactsAfter;
-use App\AI\ToolRunner;
 use App\AI\Tools\Tool;
+use App\AI\Tools\ToolRunner;
 use Illuminate\Support\Facades\Http;
 use JsonException;
 use ReflectionClass;
