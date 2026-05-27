@@ -1,8 +1,9 @@
 <?php
 
-namespace App\AI;
+namespace App\AI\Agents;
 
 use App\AI\Attributes\CompactsAfter;
+use App\AI\ToolRunner;
 use App\AI\Tools\Tool;
 use Illuminate\Support\Facades\Http;
 use JsonException;
@@ -27,9 +28,20 @@ abstract class Agent
      */
     abstract protected function schema(): ?array;
 
-    protected function instructions(): ?string
+    protected function persona(): string
     {
-        return null;
+        return 'You are a helpful AI assistant.';
+    }
+
+    public function instructions(): string
+    {
+        $instructions = $this->persona();
+
+        if (file_exists($guidelinesPath = base_path('larry.md'))) {
+            $instructions .= "\n\n## Project Guidelines\n\n".file_get_contents($guidelinesPath);
+        }
+
+        return $instructions;
     }
 
     protected function getThreshold(): int
@@ -146,13 +158,9 @@ abstract class Agent
         $payload = [
             'model' => config('services.openai.model', 'gpt-5.4-nano'),
             'input' => $this->history,
+            'instructions' => $this->instructions(),
             'tools' => (new ToolRunner($this->tools()))->definitions(),
         ];
-
-        $instructions = $this->instructions();
-        if ($instructions !== null) {
-            $payload['instructions'] = $instructions;
-        }
 
         $schema = $this->schema();
         if ($schema !== null) {

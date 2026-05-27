@@ -1,6 +1,6 @@
 <?php
 
-use App\AI\Agent;
+use App\AI\Agents\Agent;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;

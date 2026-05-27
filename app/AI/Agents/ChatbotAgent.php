@@ -2,7 +2,6 @@
 
 namespace App\AI\Agents;
 
-use App\AI\Agent;
 use App\AI\Attributes\CompactsAfter;
 use App\AI\Tools\CurrentTime;
 use App\AI\Tools\GlobFiles;

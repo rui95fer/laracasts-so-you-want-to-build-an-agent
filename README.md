@@ -573,4 +573,65 @@
    }
    ```
 
+## Episode 09 — Adding Guidelines Files
+
+- **Create a guidelines file in your project root to give the agent project-specific instructions without hardcoding them.**
+  ```php
+  // larry.md (or agents.md, claude.md, etc.)
+  // Use Pest instead of PHP Unit.
+  // Guard all Eloquent fields by default.
+  // Never use PHP doc blocks.
+  ```
+
+- **Separate `persona` from `instructions` so subclasses can override the persona without losing the guidelines file.**
+  ```php
+  abstract class Agent
+  {
+      protected function persona(): string
+      {
+          return 'You are a helpful AI assistant.';
+      }
+      
+      public function instructions(): string
+      {
+          return $this->persona();
+      }
+  }
+  ```
+
+- **Load the guidelines file in the base `instructions()` method so all agents include project rules automatically.**
+  ```php
+  public function instructions(): string
+  {
+      $instructions = $this->persona();
+      
+      if (file_exists($guidelinesPath = base_path('larry.md'))) {
+          $instructions .= "\n\n## Project Guidelines\n\n" . file_get_contents($guidelinesPath);
+      }
+      
+      return $instructions;
+  }
+  ```
+
+- **Keep instructions separate from chat history so guidelines survive compaction and stay consistent throughout the conversation.**
+  ```php
+  // Send as system instructions, not part of the messages array
+  $response = Http::post('https://api.openai.com/v1/responses', [
+      'model' => 'gpt-5.4-nano',
+      'instructions' => $agent->instructions(),
+      'input' => $agent->history,
+  ]);
+  ```
+
+- **Test that instructions load the guidelines file when it exists and work without it when deleted.**
+  ```php
+  test('loads guidelines when file exists', function () {
+      $agent = new ChatbotAgent();
+      file_put_contents(base_path('larry.md'), 'Use Pest.');
+      
+      expect($agent->instructions())->toContain('Use Pest.');
+      
+      unlink(base_path('larry.md'));
+  });
+  ```
 

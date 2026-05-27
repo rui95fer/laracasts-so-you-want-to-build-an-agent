@@ -2,7 +2,6 @@
 
 namespace App\AI\Agents;
 
-use App\AI\Agent;
 use App\AI\Tools\Tool;
 
 class GrammarAssistantAgent extends Agent
@@ -15,7 +14,7 @@ class GrammarAssistantAgent extends Agent
         return [];
     }
 
-    protected function instructions(): ?string
+    protected function persona(): string
     {
         return 'You are a grammar assistant. Extract nouns, adjectives, and verbs from the user sentence.';
     }
